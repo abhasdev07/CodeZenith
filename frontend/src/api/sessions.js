@@ -32,6 +32,10 @@ export const sessionApi = {
     const response = await axiosInstance.post(`/sessions/${id}/join`, { inviteToken });
     return response.data;
   },
+  joinSessionByToken: async (inviteToken) => {
+    const response = await axiosInstance.post(`/sessions/join/${inviteToken}`);
+    return response.data;
+  },
   endSession: async (id) => {
     const response = await axiosInstance.post(`/sessions/${id}/end`);
     return response.data;

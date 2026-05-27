@@ -16,7 +16,8 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
   const chatClientRef = useRef(null);
 
   useEffect(() => {
-    const shouldJoin = !!session?.callId && (isHost || isParticipant) && session?.status !== "completed";
+    const isEnded = ["ended", "completed", "cancelled"].includes(session?.status);
+    const shouldJoin = !!session?.callId && (isHost || isParticipant) && !isEnded;
 
     const initCall = async () => {
       if (!shouldJoin) {
@@ -104,10 +105,12 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
 
     return () => {
       const isUnmountingOrDifferentCall =
-        !shouldJoin || activeCallIdRef.current !== session?.callId || session?.status === "completed";
+        !shouldJoin ||
+        activeCallIdRef.current !== session?.callId ||
+        ["ended", "completed", "cancelled"].includes(session?.status);
       if (isUnmountingOrDifferentCall) cleanup();
     };
-  }, [session?.callId, session?.status, loadingSession, isHost, isParticipant]);
+  }, [session?._id, session?.callId, session?.status, loadingSession, isHost, isParticipant]);
 
   return {
     streamClient,

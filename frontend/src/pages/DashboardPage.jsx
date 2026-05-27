@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { useUser } from "@clerk/clerk-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useActiveSessions, useCreateSession, useMyRecentSessions } from "../hooks/useSessions";
 
 import Navbar from "../components/Navbar";
@@ -15,9 +15,6 @@ function DashboardPage() {
   const { user } = useUser();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [roomConfig, setRoomConfig] = useState({ selectedProblems: [] });
-
-  const userRole = user?.publicMetadata?.role || user?.unsafeMetadata?.role;
-  const isInterviewer = userRole === "interviewer";
 
   const createSessionMutation = useCreateSession();
 
@@ -40,8 +37,8 @@ function DashboardPage() {
     );
   };
 
-  const activeSessions = activeSessionsData?.sessions || [];
-  const recentSessions = recentSessionsData?.sessions || [];
+  const activeSessions = useMemo(() => activeSessionsData?.sessions || [], [activeSessionsData?.sessions]);
+  const recentSessions = useMemo(() => recentSessionsData?.sessions || [], [recentSessionsData?.sessions]);
 
   useEffect(() => {
     if (!user?.id || !activeSessions.length) return;
@@ -86,16 +83,14 @@ function DashboardPage() {
         </div>
       </div>
 
-      {isInterviewer && (
-        <CreateSessionModal
-          isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
-          roomConfig={roomConfig}
-          setRoomConfig={setRoomConfig}
-          onCreateRoom={handleCreateRoom}
-          isCreating={createSessionMutation.isPending}
-        />
-      )}
+      <CreateSessionModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        roomConfig={roomConfig}
+        setRoomConfig={setRoomConfig}
+        onCreateRoom={handleCreateRoom}
+        isCreating={createSessionMutation.isPending}
+      />
     </>
   );
 }

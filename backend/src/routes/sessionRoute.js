@@ -13,6 +13,7 @@ import {
   getMyRecentSessions,
   getSessionById,
   joinSession,
+  joinSessionByInviteToken,
   ensureSessionChatAccess,
   updateActiveProblem,
   updateCandidateCode,
@@ -57,6 +58,7 @@ router.post(
 );
 
 // Joining user automatically becomes candidate for that session.
+router.post("/join/:inviteToken", protectRoute, joinSessionByInviteToken);
 router.post("/:id/join", protectRoute, joinSession);
 
 // Public (authenticated) routes - accessible to all authenticated users

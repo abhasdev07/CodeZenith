@@ -29,6 +29,7 @@ function SessionPage() {
   const { user } = useUser();
   const [output, setOutput] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const inviteToken = searchParams.get("invite") || "";
 
   const { data: sessionData, isLoading: loadingSession, refetch } = useSessionById(id);
 
@@ -36,14 +37,18 @@ function SessionPage() {
   const endSessionMutation = useEndSession();
   const updateActiveProblemMutation = useUpdateActiveProblem();
   const updateCodeStateMutation = useUpdateCodeState();
+  const attemptedAutoJoinRef = useRef(null);
 
   const session = sessionData?.session;
-  const roleInSession = sessionData?.roleInSession;
-  const isHost = roleInSession === "interviewer";
-  const isParticipant = roleInSession === "candidate";
+  const sessionRole = sessionData?.sessionRole || sessionData?.roleInSession;
+
+  const isHost = sessionRole === "interviewer";
+  const isParticipant = sessionRole === "candidate";
+  const isEnded = ["ended", "completed", "cancelled"].includes(session?.status);
+  const canManageSession = isHost && !isEnded;
   const canEditCode = isParticipant;
   const canRunCode = isParticipant;
-  const shouldLockCandidateNavigation = isParticipant && !isHost && session?.status !== "completed";
+  const shouldLockCandidateNavigation = isParticipant && !isHost && !isEnded;
 
   const { call, channel, chatClient, isInitializingCall, streamClient } = useStreamClient(
     session,
@@ -74,21 +79,41 @@ function SessionPage() {
   useEffect(() => {
     if (!session || !user || loadingSession) return;
     if (isHost || isParticipant) return;
+    if (!inviteToken) return;
+    const joinAttemptKey = `${session._id}:${inviteToken}`;
+    if (attemptedAutoJoinRef.current === joinAttemptKey) return;
 
+    attemptedAutoJoinRef.current = joinAttemptKey;
     joinSessionMutation.mutate(
-      { id, inviteToken: searchParams.get("invite") || "" },
-      { onSuccess: refetch }
+      { id, inviteToken },
+      {
+        onSuccess: refetch,
+      }
     );
+  }, [
+    session,
+    user,
+    loadingSession,
+    isHost,
+    isParticipant,
+    id,
+    inviteToken,
+    refetch,
+    joinSessionMutation,
+  ]);
 
-    // remove the joinSessionMutation, refetch from dependencies to avoid infinite loop
-  }, [session, user, loadingSession, isHost, isParticipant, id, searchParams, refetch]);
-
-  // redirect the "participant" when session ends
+  // redirect when session ends
   useEffect(() => {
     if (!session || loadingSession) return;
 
-    if (session.status === "completed") navigate("/dashboard");
-  }, [session, loadingSession, navigate]);
+    if (isEnded) navigate("/dashboard");
+  }, [isEnded, session, loadingSession, navigate]);
+
+  useEffect(() => {
+    if (!isHost || !session?.inviteToken || inviteToken) return;
+
+    navigate(`/session/${id}?invite=${session.inviteToken}`, { replace: true });
+  }, [id, inviteToken, isHost, navigate, session?.inviteToken]);
 
   // update code when problem loads or changes
   useEffect(() => {
@@ -158,14 +183,15 @@ function SessionPage() {
   };
 
   const handleEndSession = () => {
+    if (sessionRole !== "interviewer") return;
     if (confirm("Are you sure you want to end this session? All participants will be notified.")) {
-      // this will navigate the HOST to dashboard
+      // this will navigate the INTERVIEWER to dashboard
       endSessionMutation.mutate(id, { onSuccess: () => navigate("/dashboard") });
     }
   };
 
   const handleChangeActiveProblem = (nextIndex) => {
-    if (!isHost || updateActiveProblemMutation.isPending) return;
+    if (sessionRole !== "interviewer" || updateActiveProblemMutation.isPending) return;
     updateActiveProblemMutation.mutate(
       { id, activeProblemIndex: nextIndex },
       {
@@ -204,9 +230,15 @@ function SessionPage() {
   );
 
   const handleCopyInviteLink = async () => {
-    const inviteUrl =
-      session?.inviteLink ||
-      `${window.location.origin}/session/${session?._id}${session?.inviteToken ? `?invite=${session.inviteToken}` : ""}`;
+    if (!session?.inviteToken && !session?.inviteLink) {
+      toast.error("Invite link is not available yet");
+      return;
+    }
+
+    const rawInviteUrl = session?.inviteLink || `/session/join/${session.inviteToken}`;
+    const inviteUrl = rawInviteUrl.startsWith("http")
+      ? rawInviteUrl
+      : `${window.location.origin}${rawInviteUrl}`;
     if (!inviteUrl || !session?._id) return;
 
     try {
@@ -266,12 +298,12 @@ function SessionPage() {
                               activeProblem.difficulty.slice(1)
                             : "Easy"}
                         </span>
-                        {isHost && session?.status === "active" && (
+                        {canManageSession && (
                           <button className="btn btn-secondary btn-sm" onClick={handleCopyInviteLink}>
                             Copy Invite
                           </button>
                         )}
-                        {isHost && session?.status === "active" && (
+                        {canManageSession && (
                           <button
                             onClick={handleEndSession}
                             disabled={endSessionMutation.isPending}
@@ -285,8 +317,8 @@ function SessionPage() {
                             End Session
                           </button>
                         )}
-                        {session?.status === "completed" && (
-                          <span className="badge badge-ghost badge-lg">Completed</span>
+                        {isEnded && (
+                          <span className="badge badge-ghost badge-lg">Ended</span>
                         )}
                       </div>
                     </div>
@@ -298,7 +330,7 @@ function SessionPage() {
                         <p className="font-semibold">
                           Question {activeProblemIndex + 1} of {sessionProblems.length}
                         </p>
-                        {isHost && (
+                        {sessionRole === "interviewer" && (
                           <div className="flex items-center gap-2">
                             <button
                               className="btn btn-sm btn-outline"
@@ -328,7 +360,7 @@ function SessionPage() {
                             key={`${problem.title}-${index}`}
                             className={`btn btn-xs ${index === activeProblemIndex ? "btn-primary" : "btn-ghost"}`}
                             onClick={() => handleChangeActiveProblem(index)}
-                            disabled={!isHost || updateActiveProblemMutation.isPending}
+                            disabled={sessionRole !== "interviewer" || updateActiveProblemMutation.isPending}
                           >
                             {index + 1}. {problem.title}
                           </button>

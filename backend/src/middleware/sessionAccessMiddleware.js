@@ -5,12 +5,15 @@ const SESSION_MEMBER_POPULATE = [
   { path: "participant", select: "name email profileImage clerkId" },
 ];
 
-export const resolveRoleInSession = (session, userId) => {
-  const normalizedUserId = userId?.toString();
+export const resolveRoleInSession = (session, userOrId) => {
+  const normalizedUserId = userOrId?._id?.toString?.() || userOrId?.toString?.();
+  const normalizedClerkId = userOrId?.clerkId?.toString?.();
   const hostId = session?.host?._id?.toString?.() || session?.host?.toString?.();
   const participantId = session?.participant?._id?.toString?.() || session?.participant?.toString?.();
-  const isInterviewer = hostId === normalizedUserId;
-  const isCandidate = participantId === normalizedUserId;
+  const hostClerkId = session?.host?.clerkId?.toString?.();
+  const participantClerkId = session?.participant?.clerkId?.toString?.();
+  const isInterviewer = hostId === normalizedUserId || hostClerkId === normalizedClerkId;
+  const isCandidate = participantId === normalizedUserId || participantClerkId === normalizedClerkId;
 
   if (isInterviewer) return "interviewer";
   if (isCandidate) return "candidate";
@@ -24,7 +27,7 @@ export const loadSessionAccess = async (req, res, next) => {
 
     if (!session) return res.status(404).json({ message: "Session not found" });
 
-    const roleInSession = resolveRoleInSession(session, req.user._id);
+    const roleInSession = resolveRoleInSession(session, req.user);
     req.sessionDoc = session;
     req.roleInSession = roleInSession;
     next();

@@ -1,4 +1,5 @@
 import { requireAuth } from "@clerk/express";
+import { clerkClient } from "@clerk/clerk-sdk-node";
 import User from "../models/User.js";
 import { upsertStreamUser } from "../lib/stream.js";
 
@@ -6,11 +7,22 @@ import { upsertStreamUser } from "../lib/stream.js";
  * Extract user information from Clerk session data
  * Handles multiple OAuth providers (Google, GitHub) and email/password auth
  */
-function extractClerkUserData(clerkAuth) {
+async function extractClerkUserData(clerkAuth) {
   const auth = clerkAuth || {};
+  let clerkUser = null;
+
+  if (auth.userId) {
+    try {
+      clerkUser = await clerkClient.users.getUser(auth.userId);
+    } catch (error) {
+      console.warn("Could not fetch Clerk user profile, falling back to session claims:", error.message);
+    }
+  }
 
   // Extract email - try multiple sources for robustness
   const email =
+    clerkUser?.primaryEmailAddress?.emailAddress ||
+    clerkUser?.emailAddresses?.[0]?.emailAddress ||
     auth.sessionClaims?.email ||
     auth.sessionClaims?.email_addresses?.[0]?.email_address ||
     auth.sessionClaims?.primary_email ||
@@ -22,14 +34,26 @@ function extractClerkUserData(clerkAuth) {
   // Priority 1: Direct firstName + lastName
   const firstName = auth.sessionClaims?.first_name || "";
   const lastName = auth.sessionClaims?.last_name || "";
+  const clerkFirstName = clerkUser?.firstName || "";
+  const clerkLastName = clerkUser?.lastName || "";
 
-  if (firstName || lastName) {
+  if (clerkFirstName || clerkLastName) {
+    fullName = `${clerkFirstName} ${clerkLastName}`.trim();
+  }
+
+  if (!fullName && (firstName || lastName)) {
     fullName = `${firstName} ${lastName}`.trim();
   }
 
   // Priority 2: fullName field (some OAuth providers)
   if (!fullName) {
-    fullName = auth.sessionClaims?.fullName || auth.sessionClaims?.name || "";
+    fullName =
+      clerkUser?.fullName ||
+      clerkUser?.username ||
+      auth.sessionClaims?.fullName ||
+      auth.sessionClaims?.name ||
+      auth.sessionClaims?.given_name ||
+      "";
   }
 
   // Priority 3: Extract name from email (fallback)
@@ -44,6 +68,7 @@ function extractClerkUserData(clerkAuth) {
 
   // Extract profile image - handle multiple sources
   const profileImage =
+    clerkUser?.imageUrl ||
     auth.sessionClaims?.image_url ||
     auth.sessionClaims?.profile_image_url ||
     auth.sessionClaims?.picture ||
@@ -77,7 +102,7 @@ export const protectRoute = [
 
       if (user) {
         // User exists - optionally update profile if changed
-        const clerkUserData = extractClerkUserData(req.auth());
+        const clerkUserData = await extractClerkUserData(req.auth());
 
         // Check if any profile info changed
         const hasChanges =
@@ -103,7 +128,7 @@ export const protectRoute = [
         }
       } else {
         // Create new user from Clerk data
-        const clerkUserData = extractClerkUserData(req.auth());
+        const clerkUserData = await extractClerkUserData(req.auth());
 
         // Validate required fields
         if (!clerkUserData.email) {

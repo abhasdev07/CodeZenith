@@ -53,14 +53,23 @@ const sessionSchema = new mongoose.Schema(
       type: [sessionProblemSchema],
       default: [],
     },
+    questions: {
+      type: [sessionProblemSchema],
+      default: [],
+    },
     activeProblemIndex: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    currentQuestionIndex: {
       type: Number,
       default: 0,
       min: 0,
     },
     status: {
       type: String,
-      enum: ["waiting", "active", "completed", "cancelled"],
+      enum: ["waiting", "active", "ended", "completed", "cancelled"],
       default: "waiting",
     },
     startedAt: {
@@ -107,16 +116,30 @@ sessionSchema.pre("validate", function syncRoleFields(next) {
   if (!this.candidate && this.participant) this.candidate = this.participant;
   if (!this.participant && this.candidate) this.participant = this.candidate;
 
+  if ((!this.problems || this.problems.length === 0) && this.questions?.length > 0) {
+    this.problems = this.questions;
+  }
+
+  if ((!this.questions || this.questions.length === 0) && this.problems?.length > 0) {
+    this.questions = this.problems;
+  }
+
   if ((!this.problems || this.problems.length === 0) && this.problem && this.difficulty) {
     this.problems = [{ title: this.problem, difficulty: this.difficulty }];
+    this.questions = this.problems;
   }
 
   if (this.problems && this.problems.length > 0) {
+    const rawIndex = this.isModified("currentQuestionIndex")
+      ? this.currentQuestionIndex
+      : this.activeProblemIndex;
     const safeIndex = Math.min(
-      Math.max(Number(this.activeProblemIndex || 0), 0),
+      Math.max(Number(rawIndex || 0), 0),
       this.problems.length - 1
     );
     this.activeProblemIndex = safeIndex;
+    this.currentQuestionIndex = safeIndex;
+    this.questions = this.problems;
     this.problem = this.problems[safeIndex]?.title || this.problem;
     this.difficulty = this.problems[safeIndex]?.difficulty || this.difficulty;
   }
