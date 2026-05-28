@@ -1,139 +1,436 @@
-import { ENV } from "../lib/env.js";
+import { getProblemByTitle } from "../data/problemRegistry.js";
 import Session from "../models/Session.js";
 
-const JUDGE0_LANGUAGES = {
-  javascript: 63,
-  python: 71,
-  java: 62,
-  cpp: 54,
+const PISTON_API_URL = "https://emkc.org/api/v2/piston";
+const OUTPUT_LIMIT = 12000;
+
+const LANGUAGE_RUNTIME = {
+  javascript: { language: "javascript", version: "18.15.0", file: "main.js" },
+  python: { language: "python", version: "3.10.0", file: "main.py" },
+  java: { language: "java", version: "15.0.2", file: "Main.java" },
+  cpp: { language: "cpp", version: "10.2.0", file: "main.cpp" },
 };
 
-// Fallback Judge0 API endpoints
-const JUDGE0_API_ENDPOINTS = [
-  ENV.JUDGE0_API_URL || "https://ce.judge0.com",
-  "https://emkc.org/api/v2/piston",
-];
+function normalizeSessionRole(session, userId) {
+  if (session.participant?.toString() === userId.toString()) return "candidate";
+  if (session.host?.toString() === userId.toString()) return "interviewer";
+  return "viewer";
+}
+
+function normalizeValue(value) {
+  if (Array.isArray(value)) return value;
+  return value;
+}
+
+function json(value) {
+  return JSON.stringify(value);
+}
+
+function cppString(value) {
+  return JSON.stringify(value);
+}
+
+function cppVector(values) {
+  return `{${values.join(",")}}`;
+}
+
+function javaString(value) {
+  return JSON.stringify(value);
+}
+
+function javaIntArray(values) {
+  return `new int[]{${values.join(",")}}`;
+}
+
+function buildJsHarness(sourceCode, problem, testCases) {
+  return `${sourceCode}
+
+const __czTests = ${json(testCases)};
+const __czExpected = __czTests.map((test) => test.expected);
+const __czResults = [];
+const __czStart = Date.now();
+for (let i = 0; i < __czTests.length; i += 1) {
+  let actual;
+  let error = null;
+  try {
+    actual = ${problem.functionName}(...__czTests[i].input);
+  } catch (err) {
+    error = err && err.stack ? err.stack : String(err);
+  }
+  const expected = __czExpected[i];
+  const passed = !error && JSON.stringify(actual) === JSON.stringify(expected);
+  __czResults.push({ index: i, input: __czTests[i].input, expected, actual, passed, error });
+}
+console.log("__CZ_RESULT__" + JSON.stringify({
+  results: __czResults,
+  runtimeMs: Date.now() - __czStart,
+  memoryKb: 0
+}));`;
+}
+
+function buildPythonHarness(sourceCode, problem, testCases) {
+  return `${sourceCode}
+
+import json as __cz_json
+import time as __cz_time
+__cz_tests = ${json(testCases)}
+__cz_results = []
+__cz_start = __cz_time.time()
+__cz_callable = None
+if "Solution" in globals():
+    __cz_solution = Solution()
+    __cz_callable = getattr(__cz_solution, "${problem.functionName}", None)
+if __cz_callable is None:
+    __cz_callable = globals().get("${problem.functionName}")
+for __cz_index, __cz_test in enumerate(__cz_tests):
+    __cz_error = None
+    __cz_actual = None
+    try:
+        __cz_actual = __cz_callable(*__cz_test["input"])
+    except Exception as __cz_exc:
+        __cz_error = str(__cz_exc)
+    __cz_expected = __cz_test["expected"]
+    __cz_passed = __cz_error is None and __cz_actual == __cz_expected
+    __cz_results.append({
+        "index": __cz_index,
+        "input": __cz_test["input"],
+        "expected": __cz_expected,
+        "actual": __cz_actual,
+        "passed": __cz_passed,
+        "error": __cz_error,
+    })
+print("__CZ_RESULT__" + __cz_json.dumps({
+    "results": __cz_results,
+    "runtimeMs": int((__cz_time.time() - __cz_start) * 1000),
+    "memoryKb": 0,
+}))`;
+}
+
+function cppCall(problem, input) {
+  const [first, second] = input;
+  if (problem.slug === "two-sum") return `sol.${problem.functionName}(vector<int>${cppVector(first)}, ${second})`;
+  if (problem.returnType === "int" && Array.isArray(first)) {
+    return `sol.${problem.functionName}(vector<int>${cppVector(first)})`;
+  }
+  if (problem.returnType === "boolean" || problem.returnType === "string") {
+    return `sol.${problem.functionName}(${cppString(first)})`;
+  }
+  return `sol.${problem.functionName}()`;
+}
+
+function buildCppHarness(sourceCode, problem, testCases) {
+  const sanitizedSource = sourceCode.replace(/\bint\s+main\s*\(/g, "int __codezenith_user_main_disabled(");
+  const cases = testCases
+    .map((testCase, index) => {
+      const actualExpression = cppCall(problem, testCase.input);
+      const expected = json(normalizeValue(testCase.expected));
+      const input = json(testCase.input);
+      const serialize =
+        problem.returnType === "intArray"
+          ? "__cz_serialize_vector(actual)"
+          : problem.returnType === "string"
+            ? "__cz_serialize_string(actual)"
+            : problem.returnType === "boolean"
+              ? "(actual ? \"true\" : \"false\")"
+              : "to_string(actual)";
+
+      return `try {
+    auto actual = ${actualExpression};
+    string actualJson = ${serialize};
+    string expectedJson = R"cz(${expected})cz";
+    __cz_results += __cz_case(${index}, R"cz(${input})cz", expectedJson, actualJson, actualJson == expectedJson, "");
+  } catch (const exception& error) {
+    __cz_results += __cz_case(${index}, R"cz(${input})cz", R"cz(${expected})cz", "null", false, error.what());
+  }`;
+    })
+    .join("\n");
+
+  return `${sanitizedSource}
+
+string __cz_escape(const string& value) {
+  string escaped;
+  for (char ch : value) {
+    if (ch == '\\\\') escaped += "\\\\\\\\";
+    else if (ch == '"') escaped += "\\\\\\"";
+    else if (ch == '\\n') escaped += "\\\\n";
+    else escaped += ch;
+  }
+  return escaped;
+}
+string __cz_serialize_string(const string& value) { return "\\"" + __cz_escape(value) + "\\""; }
+string __cz_serialize_vector(const vector<int>& values) {
+  string out = "[";
+  for (size_t i = 0; i < values.size(); i++) {
+    if (i) out += ",";
+    out += to_string(values[i]);
+  }
+  out += "]";
+  return out;
+}
+string __cz_case(int index, const string& inputJson, const string& expectedJson, const string& actualJson, bool passed, const string& error) {
+  return string(index ? "," : "") + "{\\"index\\":" + to_string(index) +
+    ",\\"input\\":" + inputJson +
+    ",\\"expected\\":" + expectedJson +
+    ",\\"actual\\":" + actualJson +
+    ",\\"passed\\":" + (passed ? "true" : "false") +
+    ",\\"error\\":\\"" + __cz_escape(error) + "\\"}";
+}
+int main() {
+  Solution sol;
+  auto __cz_start = chrono::high_resolution_clock::now();
+  string __cz_results = "";
+  ${cases}
+  auto __cz_end = chrono::high_resolution_clock::now();
+  auto __cz_runtime = chrono::duration_cast<chrono::milliseconds>(__cz_end - __cz_start).count();
+  cout << "__CZ_RESULT__{\\"results\\":[" << __cz_results << "],\\"runtimeMs\\":" << __cz_runtime << ",\\"memoryKb\\":0}" << endl;
+  return 0;
+}`;
+}
+
+function javaCall(problem, input) {
+  const [first, second] = input;
+  if (problem.slug === "two-sum") return `sol.${problem.functionName}(${javaIntArray(first)}, ${second})`;
+  if (problem.returnType === "int" && Array.isArray(first)) {
+    return `sol.${problem.functionName}(${javaIntArray(first)})`;
+  }
+  if (problem.returnType === "boolean" || problem.returnType === "string") {
+    return `sol.${problem.functionName}(${javaString(first)})`;
+  }
+  return `sol.${problem.functionName}()`;
+}
+
+function buildJavaHarness(sourceCode, problem, testCases) {
+  const cases = testCases
+    .map((testCase, index) => {
+      const actualExpression = javaCall(problem, testCase.input);
+      const expected = json(normalizeValue(testCase.expected));
+      const input = json(testCase.input);
+      const serialize =
+        problem.returnType === "intArray"
+          ? "__czSerialize(actual)"
+          : problem.returnType === "string"
+            ? "__czString(actual)"
+            : problem.returnType === "boolean"
+              ? "String.valueOf(actual)"
+              : "String.valueOf(actual)";
+
+      return `try {
+            var actual = ${actualExpression};
+            String actualJson = ${serialize};
+            String expectedJson = ${javaString(expected)};
+            __czResults.append(__czCase(${index}, ${javaString(input)}, expectedJson, actualJson, actualJson.equals(expectedJson), ""));
+        } catch (Exception error) {
+            __czResults.append(__czCase(${index}, ${javaString(input)}, ${javaString(expected)}, "null", false, error.toString()));
+        }`;
+    })
+    .join("\n");
+
+  return `${sourceCode}
+
+class Main {
+    static String __czEscape(String value) {
+        return value.replace("\\\\", "\\\\\\\\").replace("\\"", "\\\\\\"").replace("\\n", "\\\\n");
+    }
+    static String __czString(String value) {
+        return "\\"" + __czEscape(value) + "\\"";
+    }
+    static String __czSerialize(int[] values) {
+        StringBuilder out = new StringBuilder("[");
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) out.append(",");
+            out.append(values[i]);
+        }
+        out.append("]");
+        return out.toString();
+    }
+    static String __czCase(int index, String inputJson, String expectedJson, String actualJson, boolean passed, String error) {
+        return (index > 0 ? "," : "") + "{\\"index\\":" + index +
+            ",\\"input\\":" + inputJson +
+            ",\\"expected\\":" + expectedJson +
+            ",\\"actual\\":" + actualJson +
+            ",\\"passed\\":" + passed +
+            ",\\"error\\":\\"" + __czEscape(error) + "\\"}";
+    }
+    public static void main(String[] args) {
+        Solution sol = new Solution();
+        long started = System.currentTimeMillis();
+        StringBuilder __czResults = new StringBuilder();
+        ${cases}
+        long runtime = System.currentTimeMillis() - started;
+        System.out.println("__CZ_RESULT__{\\"results\\":[" + __czResults + "],\\"runtimeMs\\":" + runtime + ",\\"memoryKb\\":0}");
+    }
+}`;
+}
+
+export function buildHarness(language, sourceCode, problem, testCases) {
+  if (language === "javascript") return buildJsHarness(sourceCode, problem, testCases);
+  if (language === "python") return buildPythonHarness(sourceCode, problem, testCases);
+  if (language === "cpp") return buildCppHarness(sourceCode, problem, testCases);
+  if (language === "java") return buildJavaHarness(sourceCode, problem, testCases);
+  return sourceCode;
+}
+
+async function executeOnPiston(language, sourceCode) {
+  const runtime = LANGUAGE_RUNTIME[language];
+  if (!runtime) throw new Error(`Unsupported language: ${language}`);
+
+  const response = await fetch(`${PISTON_API_URL}/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      language: runtime.language,
+      version: runtime.version,
+      files: [{ name: runtime.file, content: sourceCode }],
+      compile_timeout: 10000,
+      run_timeout: 3000,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Execution provider failed (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
+}
+
+function parseExecutionResult(providerResult, mode, totalCases) {
+  const compileError = providerResult.compile?.stderr || "";
+  const runtimeError = providerResult.run?.stderr || "";
+  const stdout = (providerResult.run?.stdout || "").slice(0, OUTPUT_LIMIT);
+  const signal = providerResult.run?.signal;
+  const code = providerResult.run?.code;
+
+  if (compileError) {
+    return {
+      success: false,
+      type: "compile_error",
+      verdict: "Compilation Error",
+      output: stdout,
+      error: compileError,
+      passedCount: 0,
+      totalCases,
+      cases: [],
+    };
+  }
+
+  if (signal || (code !== undefined && code !== 0 && !stdout.includes("__CZ_RESULT__"))) {
+    return {
+      success: false,
+      type: signal === "SIGKILL" ? "time_limit_exceeded" : "runtime_error",
+      verdict: signal === "SIGKILL" ? "Time Limit Exceeded" : "Runtime Error",
+      output: stdout,
+      error: runtimeError || `Process exited with code ${code}`,
+      passedCount: 0,
+      totalCases,
+      cases: [],
+    };
+  }
+
+  const markerLine = stdout
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("__CZ_RESULT__"));
+
+  if (!markerLine) {
+    return {
+      success: false,
+      type: "runtime_error",
+      verdict: "Runtime Error",
+      output: stdout,
+      error: runtimeError || "The solution did not produce a structured CodeZenith result.",
+      passedCount: 0,
+      totalCases,
+      cases: [],
+    };
+  }
+
+  const parsed = JSON.parse(markerLine.replace("__CZ_RESULT__", ""));
+  const cases = parsed.results || [];
+  const passedCount = cases.filter((testCase) => testCase.passed).length;
+  const accepted = passedCount === totalCases;
+
+  return {
+    success: accepted,
+    type: accepted ? "success" : "wrong_answer",
+    verdict: accepted ? (mode === "submit" ? "Accepted" : "All visible cases passed") : "Wrong Answer",
+    output: stdout
+      .split(/\r?\n/)
+      .filter((line) => !line.startsWith("__CZ_RESULT__"))
+      .join("\n")
+      .trim(),
+    error: accepted ? "" : "One or more test cases failed.",
+    runtimeMs: parsed.runtimeMs || 0,
+    memoryKb: parsed.memoryKb || 0,
+    passedCount,
+    totalCases,
+    cases,
+  };
+}
 
 export async function executeCode(req, res) {
   try {
-    const { sessionId, language, sourceCode, stdin = "" } = req.body;
+    const { sessionId, language, sourceCode, problemTitle, mode = "run" } = req.body;
 
-    if (!language || !sourceCode) {
-      return res.status(400).json({ message: "language and sourceCode are required" });
+    if (!language || !sourceCode || !problemTitle) {
+      return res.status(400).json({ message: "language, sourceCode, and problemTitle are required" });
     }
 
-    const languageId = JUDGE0_LANGUAGES[language];
-    if (!languageId) {
+    if (!LANGUAGE_RUNTIME[language]) {
       return res.status(400).json({ message: `Unsupported language: ${language}` });
+    }
+
+    if (!["run", "submit"].includes(mode)) {
+      return res.status(400).json({ message: "mode must be run or submit" });
     }
 
     if (sessionId) {
       const session = await Session.findById(sessionId);
       if (!session) return res.status(404).json({ message: "Session not found" });
-
-      if (session.status !== "active") {
-        return res.status(400).json({ message: "Cannot execute code on inactive session" });
+      if (!["waiting", "active"].includes(session.status)) {
+        return res.status(400).json({ message: "Cannot execute code on ended session" });
       }
 
-      // Session-based permission: only participant (candidate) can run code
-      const isParticipant = session.participant?.toString() === req.user._id.toString();
-      if (!isParticipant) {
-        return res.status(403).json({ message: "Only the session participant can run code" });
+      const sessionRole = normalizeSessionRole(session, req.user._id);
+      if (sessionRole !== "candidate") {
+        return res.status(403).json({ message: "Only the session candidate can run or submit code" });
       }
     }
 
-    // Try each endpoint until one works
-    let lastError = null;
-    for (const endpoint of JUDGE0_API_ENDPOINTS) {
-      try {
-        const isPiston = endpoint.includes("piston");
-        const apiUrl = isPiston 
-          ? `${endpoint}/execute`
-          : `${endpoint}/submissions?base64_encoded=false&wait=true`;
+    const problem = getProblemByTitle(problemTitle);
+    if (!problem) return res.status(400).json({ message: `Unknown problem: ${problemTitle}` });
 
-        const body = isPiston
-          ? {
-              language: language === "javascript" ? "javascript" : language,
-              version: language === "javascript" ? "18.15.0" : language === "python" ? "3.10.0" : "15.0.2",
-              files: [{ name: `main.${language === "javascript" ? "js" : language}`, content: sourceCode }],
-            }
-          : {
-              language_id: languageId,
-              source_code: sourceCode,
-              stdin,
-            };
+    const testCases =
+      mode === "submit"
+        ? [...problem.visibleTestCases, ...problem.hiddenTestCases]
+        : problem.visibleTestCases;
 
-        console.log(`🔧 Executing code on ${endpoint}:`, { language, isPiston });
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
+    const harnessedSource = buildHarness(language, sourceCode, problem, testCases);
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          lastError = `${endpoint} returned ${response.status}: ${errorText}`;
-          console.warn(`⚠️ Code execution endpoint ${endpoint} failed: ${response.status}`, errorText);
-          continue;
-        }
+    console.log("Code execution requested", {
+      sessionId,
+      problemTitle,
+      language,
+      mode,
+      testCases: testCases.length,
+      userId: req.user._id.toString(),
+    });
 
-        const result = await response.json();
-        console.log(`✅ Code execution success on ${endpoint}:`, result);
+    const providerResult = await executeOnPiston(language, harnessedSource);
+    const result = parseExecutionResult(providerResult, mode, testCases.length);
 
-        // Handle different response formats
-        let output, compileError, runtimeError, message;
-
-        if (isPiston) {
-          output = result.run?.output || "";
-          compileError = result.run?.stderr || "";
-          runtimeError = result.run?.stderr || "";
-          message = result.message || "";
-        } else {
-          output = result.stdout || "";
-          compileError = result.compile_output || "";
-          runtimeError = result.stderr || "";
-          message = result.message || "";
-        }
-
-        if (compileError) {
-          return res.status(200).json({
-            success: false,
-            type: "compile_error",
-            output,
-            error: compileError,
-          });
-        }
-
-        if (runtimeError || message) {
-          return res.status(200).json({
-            success: false,
-            type: "runtime_error",
-            output,
-            error: runtimeError || message,
-          });
-        }
-
-        return res.status(200).json({
-          success: true,
-          type: "success",
-          output: output || "No output",
-        });
-      } catch (endpointError) {
-        lastError = `${endpoint} failed: ${endpointError.message}`;
-        console.warn(`⚠️ Code execution endpoint ${endpoint} error: ${endpointError.message}`);
-        continue;
-      }
-    }
-
-    // All endpoints failed
-    return res.status(502).json({
-      message: "All code execution providers failed",
-      error: lastError || "Unknown error",
+    return res.status(200).json({
+      ...result,
+      mode,
+      hiddenCasesIncluded: mode === "submit",
     });
   } catch (error) {
     console.log("Error in executeCode controller:", error.message);
-    res.status(500).json({ message: "Internal Server Error" });
+    res.status(502).json({
+      success: false,
+      type: "provider_error",
+      verdict: "Execution Provider Error",
+      message: "Execution provider failed",
+      error: error.message,
+    });
   }
 }

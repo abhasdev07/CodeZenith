@@ -1,11 +1,18 @@
 import axiosInstance from "./axios";
 
-export async function executeCode({ sessionId, language, sourceCode, stdin = "" }) {
+export async function executeCode({
+  sessionId,
+  language,
+  sourceCode,
+  problemTitle,
+  mode = "run",
+}) {
   try {
     const payload = {
       language,
       sourceCode,
-      stdin,
+      problemTitle,
+      mode,
     };
     if (sessionId) payload.sessionId = sessionId;
 

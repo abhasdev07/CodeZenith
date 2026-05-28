@@ -9,6 +9,7 @@ import StatsCards from "../components/StatsCards";
 import ActiveSessions from "../components/ActiveSessions";
 import RecentSessions from "../components/RecentSessions";
 import CreateSessionModal from "../components/CreateSessionModal";
+import { hasLeftSession } from "../lib/sessionLifecycle";
 
 function DashboardPage() {
   const navigate = useNavigate();
@@ -48,7 +49,7 @@ function DashboardPage() {
         session.participant?.clerkId === user.id && session.host?.clerkId !== user.id
     );
 
-    if (participantSession?._id) {
+    if (participantSession?._id && !hasLeftSession(participantSession._id)) {
       navigate(`/session/${participantSession._id}`);
     }
   }, [activeSessions, navigate, user?.id]);

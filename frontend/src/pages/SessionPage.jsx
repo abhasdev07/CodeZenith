@@ -21,6 +21,7 @@ import OutputPanel from "../components/OutputPanel";
 import useStreamClient from "../hooks/useStreamClient";
 import { StreamCall, StreamVideo } from "@stream-io/video-react-sdk";
 import VideoCallUI from "../components/VideoCallUI";
+import { clearSessionLeft, markSessionLeft } from "../lib/sessionLifecycle";
 
 function SessionPage() {
   const navigate = useNavigate();
@@ -29,6 +30,8 @@ function SessionPage() {
   const { user } = useUser();
   const [output, setOutput] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [remoteCursor, setRemoteCursor] = useState(null);
   const inviteToken = searchParams.get("invite") || "";
 
   const { data: sessionData, isLoading: loadingSession, refetch } = useSessionById(id);
@@ -50,7 +53,7 @@ function SessionPage() {
   const canRunCode = isParticipant;
   const shouldLockCandidateNavigation = isParticipant && !isHost && !isEnded;
 
-  const { call, channel, chatClient, isInitializingCall, streamClient } = useStreamClient(
+  const { call, channel, chatClient, isInitializingCall, streamClient, callError } = useStreamClient(
     session,
     loadingSession,
     isHost,
@@ -115,6 +118,11 @@ function SessionPage() {
     navigate(`/session/${id}?invite=${session.inviteToken}`, { replace: true });
   }, [id, inviteToken, isHost, navigate, session?.inviteToken]);
 
+  useEffect(() => {
+    if (!isParticipant || !session?._id) return;
+    clearSessionLeft(session._id);
+  }, [isParticipant, session?._id]);
+
   // update code when problem loads or changes
   useEffect(() => {
     const codeKey = `${activeProblemIndex}:${selectedLanguage}`;
@@ -128,17 +136,37 @@ function SessionPage() {
     if (!channel) return undefined;
 
     const listener = channel.on((event) => {
-      if (event.type !== "code.update") return;
       if (event.user?.id === user?.id) return;
-      if (event.codeKey !== `${activeProblemIndex}:${selectedLanguage}`) return;
 
-      setCode(event.code || "");
+      if (event.type === "code.update" || event.type === "code-change") {
+        if (event.codeKey !== `${activeProblemIndex}:${selectedLanguage}`) return;
+        setCode(event.code || "");
+      }
+
+      if (event.type === "language-switched" && event.language) {
+        setSelectedLanguage(event.language);
+        if (typeof event.code === "string") setCode(event.code);
+        setOutput(null);
+      }
+
+      if (event.type === "code-executed" || event.type === "submission-result") {
+        setOutput(event.result || null);
+      }
+
+      if (event.type === "question-switched") {
+        setOutput(null);
+        refetch();
+      }
+
+      if (event.type === "cursor-change") {
+        setRemoteCursor(event.position || null);
+      }
     });
 
     return () => {
       listener?.unsubscribe?.();
     };
-  }, [channel, user?.id, activeProblemIndex, selectedLanguage]);
+  }, [channel, user?.id, activeProblemIndex, selectedLanguage, refetch]);
 
   useEffect(() => {
     return () => {
@@ -163,24 +191,47 @@ function SessionPage() {
     const newLang = e.target.value;
     setSelectedLanguage(newLang);
     // use problem-specific starter code
-    const starterCode = problemData?.starterCode?.[newLang] || "";
+    const codeKey = `${activeProblemIndex}:${newLang}`;
+    const starterCode = session?.candidateCode?.[codeKey] || problemData?.starterCode?.[newLang] || "";
     setCode(starterCode);
     setOutput(null);
+
+    if (isParticipant) {
+      channel?.sendEvent({
+        type: "language-switched",
+        language: newLang,
+        code: starterCode,
+        codeKey,
+      });
+    }
   };
 
-  const handleRunCode = async () => {
+  const handleExecuteCode = async (mode) => {
     if (!canRunCode || !session?._id) return;
-    setIsRunning(true);
+    if (mode === "submit") setIsSubmitting(true);
+    else setIsRunning(true);
     setOutput(null);
 
     const result = await executeCode({
       sessionId: session._id,
       language: selectedLanguage,
       sourceCode: code,
+      problemTitle: activeProblem?.title,
+      mode,
     });
     setOutput(result);
-    setIsRunning(false);
+    channel?.sendEvent({
+      type: mode === "submit" ? "submission-result" : "code-executed",
+      result,
+      language: selectedLanguage,
+      problemTitle: activeProblem?.title,
+    });
+    if (mode === "submit") setIsSubmitting(false);
+    else setIsRunning(false);
   };
+
+  const handleRunCode = () => handleExecuteCode("run");
+  const handleSubmitCode = () => handleExecuteCode("submit");
 
   const handleEndSession = () => {
     if (sessionRole !== "interviewer") return;
@@ -190,6 +241,11 @@ function SessionPage() {
     }
   };
 
+  const handleLeaveMeeting = () => {
+    if (session?._id) markSessionLeft(session._id);
+    navigate("/dashboard", { replace: true });
+  };
+
   const handleChangeActiveProblem = (nextIndex) => {
     if (sessionRole !== "interviewer" || updateActiveProblemMutation.isPending) return;
     updateActiveProblemMutation.mutate(
@@ -197,6 +253,10 @@ function SessionPage() {
       {
         onSuccess: () => {
           setOutput(null);
+          channel?.sendEvent({
+            type: "question-switched",
+            activeProblemIndex: nextIndex,
+          });
           refetch();
         },
       }
@@ -209,9 +269,11 @@ function SessionPage() {
 
     const codeKey = `${activeProblemIndex}:${selectedLanguage}`;
     channel?.sendEvent({
-      type: "code.update",
+      type: "code-change",
       codeKey,
       code: value,
+      language: selectedLanguage,
+      activeProblemIndex,
     });
 
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -222,6 +284,19 @@ function SessionPage() {
         code: value,
       });
     }, 900);
+  };
+
+  const handleEditorMount = (editor) => {
+    editor.onDidChangeCursorPosition((event) => {
+      if (!isParticipant || !session?._id) return;
+      channel?.sendEvent({
+        type: "cursor-change",
+        position: {
+          lineNumber: event.position.lineNumber,
+          column: event.position.column,
+        },
+      });
+    });
   };
 
   const activeDifficultyClass = useMemo(
@@ -287,6 +362,11 @@ function SessionPage() {
                           Host: {session?.host?.name || "Loading..."} •{" "}
                           {session?.participant ? 2 : 1}/2 participants
                         </p>
+                        {isHost && remoteCursor && (
+                          <p className="text-xs text-base-content/50 mt-1">
+                            Candidate cursor: line {remoteCursor.lineNumber}, col {remoteCursor.column}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-3">
@@ -449,14 +529,19 @@ function SessionPage() {
                 <PanelGroup direction="vertical">
                   <Panel defaultSize={70} minSize={30}>
                     <CodeEditorPanel
+                      key={`${session?._id || "session"}-${activeProblemIndex}-${selectedLanguage}-${isParticipant}`}
                       selectedLanguage={selectedLanguage}
                       code={code}
                       isRunning={isRunning}
+                      isSubmitting={isSubmitting}
                       canRunCode={canRunCode}
+                      canSubmitCode={canRunCode}
                       isReadOnly={!canEditCode}
                       onLanguageChange={handleLanguageChange}
                       onCodeChange={handleCodeChange}
                       onRunCode={handleRunCode}
+                      onSubmitCode={handleSubmitCode}
+                      onEditorMount={handleEditorMount}
                     />
                   </Panel>
 
@@ -496,9 +581,18 @@ function SessionPage() {
                 </div>
               ) : (
                 <div className="h-full">
+                  {callError && (
+                    <div className="alert alert-warning mb-3 text-sm">
+                      <span>{callError}</span>
+                    </div>
+                  )}
                   <StreamVideo client={streamClient}>
                     <StreamCall call={call}>
-                      <VideoCallUI chatClient={chatClient} channel={channel} />
+                      <VideoCallUI
+                        chatClient={chatClient}
+                        channel={channel}
+                        onLeaveMeeting={handleLeaveMeeting}
+                      />
                     </StreamCall>
                   </StreamVideo>
                 </div>

@@ -4,46 +4,80 @@ import toast from "react-hot-toast";
 import { initializeStreamClient, disconnectStreamClient } from "../lib/stream";
 import { sessionApi } from "../api/sessions";
 
+const JOIN_TIMEOUT_MS = 10000;
+
+function withTimeout(promise, timeoutMs, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]);
+}
+
 function useStreamClient(session, loadingSession, isHost, isParticipant) {
   const [streamClient, setStreamClient] = useState(null);
   const [call, setCall] = useState(null);
   const [chatClient, setChatClient] = useState(null);
   const [channel, setChannel] = useState(null);
   const [isInitializingCall, setIsInitializingCall] = useState(true);
+  const [callError, setCallError] = useState("");
   const activeCallIdRef = useRef(null);
   const streamClientRef = useRef(null);
   const videoCallRef = useRef(null);
   const chatClientRef = useRef(null);
 
   useEffect(() => {
+    // Only initialize on first load, not on refetch
+    const isSessionDataReady = !!session?.callId && !!session?._id;
     const isEnded = ["ended", "completed", "cancelled"].includes(session?.status);
-    const shouldJoin = !!session?.callId && (isHost || isParticipant) && !isEnded;
+    const shouldJoin = isSessionDataReady && (isHost || isParticipant) && !isEnded;
 
     const initCall = async () => {
       if (!shouldJoin) {
+        console.log("[useStreamClient] Not joining - shouldJoin is false", {
+          hasCallId: !!session?.callId,
+          isHost,
+          isParticipant,
+          isEnded,
+        });
         setIsInitializingCall(false);
         return;
       }
 
       if (activeCallIdRef.current === session.callId && streamClientRef.current) {
+        console.log("[useStreamClient] Already initialized for this call");
         setIsInitializingCall(false);
         return;
       }
 
       try {
         setIsInitializingCall(true);
+        setCallError("");
         await cleanup();
 
+        console.log("[useStreamClient] Ensuring session chat access...");
         await sessionApi.ensureSessionChatAccess(session._id);
-        const { token, userId, userName, userImage } = await sessionApi.getStreamToken();
+        
+        console.log("[useStreamClient] Getting Stream token...");
+        const { token, userId, userName, userImage } = await withTimeout(
+          sessionApi.getStreamToken(),
+          5000,
+          "Getting Stream token timed out"
+        );
 
-        const client = await initializeStreamClient(
-          {
-            id: userId,
-            name: userName,
-            image: userImage,
-          },
-          token
+        console.log("[useStreamClient] Initializing Stream client...");
+        const client = await withTimeout(
+          initializeStreamClient(
+            {
+              id: userId,
+              name: userName,
+              image: userImage,
+            },
+            token
+          ),
+          5000,
+          "Stream client initialization timed out"
         );
 
         streamClientRef.current = client;
@@ -51,7 +85,6 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
         activeCallIdRef.current = session.callId;
 
         const videoCall = client.call("default", session.callId);
-        await videoCall.join({ create: true });
         videoCallRef.current = videoCall;
         setCall(videoCall);
 
@@ -59,24 +92,43 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
         const chatClientInstance = StreamChat.getInstance(apiKey);
 
         if (!chatClientInstance.userID) {
-          await chatClientInstance.connectUser(
-            {
-              id: userId,
-              name: userName,
-              image: userImage,
-            },
-            token
+          console.log("[useStreamClient] Connecting chat user...");
+          await withTimeout(
+            chatClientInstance.connectUser(
+              {
+                id: userId,
+                name: userName,
+                image: userImage,
+              },
+              token
+            ),
+            5000,
+            "Chat connection timed out"
           );
         }
         chatClientRef.current = chatClientInstance;
         setChatClient(chatClientInstance);
 
+        console.log("[useStreamClient] Watching chat channel...");
         const chatChannel = chatClientInstance.channel("messaging", session.callId);
-        await chatChannel.watch();
+        await withTimeout(
+          chatChannel.watch(),
+          5000,
+          "Chat channel watch timed out"
+        );
         setChannel(chatChannel);
+
+        console.log("[useStreamClient] Joining video call...");
+        await withTimeout(
+          videoCall.join({ create: true }),
+          JOIN_TIMEOUT_MS,
+          "Video join timed out. Check camera/microphone permissions and network access."
+        );
+        console.log("[useStreamClient] Successfully initialized Stream client");
       } catch (error) {
-        toast.error("Failed to join video call");
-        console.error("Error init call", error);
+        console.error("[useStreamClient] Error initializing call:", error);
+        setCallError(error.message || "Failed to join video call");
+        toast.error("Video connection issue: " + (error.message || "Please refresh and try again."));
       } finally {
         setIsInitializingCall(false);
       }
@@ -84,16 +136,31 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
 
     const cleanup = async () => {
       try {
-        if (videoCallRef.current) await videoCallRef.current.leave();
-        if (chatClientRef.current?.userID) await chatClientRef.current.disconnectUser();
-        await disconnectStreamClient();
+        console.log("[useStreamClient] Starting cleanup...");
+        
+        if (videoCallRef.current) {
+          console.log("[useStreamClient] Leaving video call...");
+          await withTimeout(videoCallRef.current.leave(), 3000, "Video leave timed out");
+        }
+        
+        if (chatClientRef.current?.userID) {
+          console.log("[useStreamClient] Disconnecting chat...");
+          await withTimeout(chatClientRef.current.disconnectUser(), 3000, "Chat disconnect timed out");
+        }
+        
+        console.log("[useStreamClient] Disconnecting Stream client...");
+        await withTimeout(disconnectStreamClient(), 3000, "Stream disconnect timed out");
+        
+        console.log("[useStreamClient] Cleanup complete");
       } catch (error) {
-        console.error("Cleanup error:", error);
+        console.error("[useStreamClient] Cleanup error (non-blocking):", error);
+        // Don't throw - cleanup is best-effort
       } finally {
         videoCallRef.current = null;
         chatClientRef.current = null;
         streamClientRef.current = null;
         activeCallIdRef.current = null;
+        setCallError("");
         setCall(null);
         setChannel(null);
         setChatClient(null);
@@ -110,7 +177,7 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
         ["ended", "completed", "cancelled"].includes(session?.status);
       if (isUnmountingOrDifferentCall) cleanup();
     };
-  }, [session?._id, session?.callId, session?.status, loadingSession, isHost, isParticipant]);
+  }, [session?._id, session?.callId, session?.status, isHost, isParticipant]);
 
   return {
     streamClient,
@@ -118,6 +185,7 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
     chatClient,
     channel,
     isInitializingCall,
+    callError,
   };
 }
 

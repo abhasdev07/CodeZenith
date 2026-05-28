@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router";
 import { getDifficultyBadgeClass } from "../lib/utils";
+import { clearSessionLeft } from "../lib/sessionLifecycle";
 
 function ActiveSessions({ sessions, isLoading, isUserInSession }) {
   const getSessionHref = (session) => {
@@ -101,6 +102,7 @@ function ActiveSessions({ sessions, isLoading, isUserInSession }) {
                   ) : (
                     <Link
                       to={getSessionHref(session)}
+                      onClick={() => clearSessionLeft(session._id)}
                       className="btn btn-primary btn-sm gap-2"
                     >
                       {isUserInSession(session) ? "Rejoin" : "Join"}

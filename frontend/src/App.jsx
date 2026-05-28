@@ -11,6 +11,7 @@ import ProblemsPage from "./pages/ProblemsPage";
 import SessionPage from "./pages/SessionPage";
 import JoinSessionPage from "./pages/JoinSessionPage";
 import axiosInstance from "./lib/axios";
+import { hasLeftSession } from "./lib/sessionLifecycle";
 
 function App() {
   const { isSignedIn, isLoaded, user } = useUser();
@@ -30,6 +31,7 @@ function App() {
         );
 
         if (!participantSession?._id) return;
+        if (hasLeftSession(participantSession._id)) return;
 
         const targetPath = `/session/${participantSession._id}`;
         const isAlreadyInsideTargetSession = location.pathname === targetPath;
