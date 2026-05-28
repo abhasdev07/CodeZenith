@@ -1,5 +1,6 @@
 import Editor from "@monaco-editor/react";
 import { CheckCircle2Icon, Loader2Icon, PlayIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { LANGUAGE_CONFIG } from "../data/problems";
 
 function CodeEditorPanel({
@@ -10,13 +11,53 @@ function CodeEditorPanel({
   canRunCode = true,
   canSubmitCode = true,
   isReadOnly = false,
+  syncCodeFromProps = true,
   onLanguageChange,
   onCodeChange,
   onRunCode,
   onSubmitCode,
   onEditorMount,
 }) {
+  const contentDisposableRef = useRef(null);
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    if (!syncCodeFromProps) return;
+
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!model || code === model.getValue()) return;
+
+    const selection = editor.getSelection();
+    const scrollTop = editor.getScrollTop();
+    const scrollLeft = editor.getScrollLeft();
+
+    model.pushEditOperations(
+      selection ? [selection] : [],
+      [
+        {
+          range: model.getFullModelRange(),
+          text: code,
+          forceMoveMarkers: true,
+        },
+      ],
+      () => (selection ? [selection] : null)
+    );
+    if (selection) editor.setSelection(selection);
+    editor.setScrollTop(scrollTop);
+    editor.setScrollLeft(scrollLeft);
+  }, [code, selectedLanguage, syncCodeFromProps]);
+
+  useEffect(() => {
+    return () => {
+      contentDisposableRef.current?.dispose();
+      contentDisposableRef.current = null;
+      editorRef.current = null;
+    };
+  }, []);
+
   const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
     monaco.editor.defineTheme("codezenith-dark", {
       base: "vs-dark",
       inherit: true,
@@ -30,6 +71,10 @@ function CodeEditorPanel({
     });
     monaco.editor.setTheme("codezenith-dark");
     editor.updateOptions({ wordBasedSuggestions: "allDocuments" });
+    contentDisposableRef.current?.dispose();
+    contentDisposableRef.current = editor.onDidChangeModelContent(() => {
+      onCodeChange?.(editor.getValue());
+    });
     onEditorMount?.(editor, monaco);
   };
 
@@ -97,8 +142,7 @@ function CodeEditorPanel({
         <Editor
           height={"100%"}
           language={LANGUAGE_CONFIG[selectedLanguage].monacoLang}
-          value={code}
-          onChange={onCodeChange}
+          defaultValue={code}
           onMount={handleEditorMount}
           theme="vs-dark"
           options={{
