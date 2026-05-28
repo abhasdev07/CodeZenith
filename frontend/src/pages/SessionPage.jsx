@@ -218,10 +218,10 @@ function SessionPage() {
   const activeProblemIndex = session?.activeProblemIndex ?? 0;
   const activeProblem = sessionProblems[activeProblemIndex];
 
-  // find the problem data based on active problem title
-  const problemData = activeProblem?.title
+  const fallbackProblemData = activeProblem?.title
     ? Object.values(PROBLEMS).find((p) => p.title === activeProblem.title)
     : null;
+  const problemData = activeProblem?.question || fallbackProblemData || activeProblem || null;
 
   const [selectedLanguage, setSelectedLanguage] = useState("javascript");
   const [code, setCode] = useState(problemData?.starterCode?.[selectedLanguage] || "");
@@ -315,7 +315,8 @@ function SessionPage() {
   useEffect(() => {
     const codeKey = `${activeProblemIndex}:${selectedLanguage}`;
     const persistedCode = getStoredCode(session?.candidateCode, codeKey);
-    const starterCode = problemData?.starterCode?.[selectedLanguage];
+    const starterCode =
+      problemData?.starterCode?.[selectedLanguage] || problemData?.boilerplates?.[selectedLanguage];
     const nextCode = persistedCode ?? starterCode ?? "";
     const isNewEditorContext = loadedCodeKeyRef.current !== codeKey;
 
@@ -606,7 +607,11 @@ function SessionPage() {
     // use problem-specific starter code
     const codeKey = `${activeProblemIndex}:${newLang}`;
     const storedCode = getStoredCode(session?.candidateCode, codeKey);
-    const starterCode = storedCode ?? problemData?.starterCode?.[newLang] ?? "";
+    const starterCode =
+      storedCode ??
+      problemData?.starterCode?.[newLang] ??
+      problemData?.boilerplates?.[newLang] ??
+      "";
     loadedCodeKeyRef.current = codeKey;
     codeRef.current = starterCode;
     setCode(starterCode);
@@ -634,6 +639,8 @@ function SessionPage() {
       sessionId: session._id,
       language: selectedLanguage,
       problemTitle: activeProblem?.title,
+      questionId: activeProblem?.questionId || problemData?._id,
+      problemSlug: activeProblem?.slug || problemData?.slug,
       timestamp: Date.now(),
       clientId: clientIdRef.current,
     });
@@ -643,6 +650,8 @@ function SessionPage() {
       language: selectedLanguage,
       sourceCode: codeRef.current,
       problemTitle: activeProblem?.title,
+      questionId: activeProblem?.questionId || problemData?._id,
+      problemSlug: activeProblem?.slug || problemData?.slug,
       mode,
     });
     setOutput(result);
@@ -950,6 +959,10 @@ function SessionPage() {
                         <p className="text-base-content/60 mt-2">
                           Host: {session?.host?.name || "Loading..."} •{" "}
                           {session?.participant ? 2 : 1}/2 participants
+                        </p>
+                        <p className="text-sm text-base-content/60 mt-1">
+                          {problemData?.visibleTestCaseCount ?? problemData?.visibleTestCases?.length ?? 0} visible
+                          testcases â€¢ {problemData?.totalTestCaseCount ?? activeProblem?.totalTestCaseCount ?? 0} total on submit
                         </p>
                         {isHost && remoteCursorPosition && (
                           <p className="text-xs text-base-content/50 mt-1">

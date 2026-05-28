@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import Navbar from "../components/Navbar";
 import { useJoinSessionByToken } from "../hooks/useSessions";
-import { sessionApi } from "../api/sessions";
 import { clearSessionLeft } from "../lib/sessionLifecycle";
 
 function JoinSessionPage() {
@@ -25,20 +24,6 @@ function JoinSessionPage() {
   useEffect(() => {
     mutateAsyncRef.current = joinSessionMutation.mutateAsync;
   }, [joinSessionMutation.mutateAsync]);
-
-  const findJoinedSession = async () => {
-    try {
-      console.log("[JoinSessionPage] Searching for joined session...");
-      const data = await sessionApi.getActiveSessions();
-      const joinedSession = data?.sessions?.find((session) => session.roleInSession === "candidate");
-      console.log("[JoinSessionPage] Found session:", joinedSession?._id);
-      if (joinedSession?._id) return joinedSession._id;
-      return null;
-    } catch (err) {
-      console.error("[JoinSessionPage] Search error:", err);
-      return null;
-    }
-  };
 
   useEffect(() => {
     // Early exit conditions
@@ -126,7 +111,7 @@ function JoinSessionPage() {
 
     performJoin();
 
-  }, [token, retryCount]);
+  }, [navigate, retryCount, token]);
 
   return (
     <div className="min-h-screen bg-base-300">

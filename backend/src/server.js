@@ -12,6 +12,7 @@ import { inngest, functions } from "./lib/inngest.js";
 
 import chatRoutes from "./routes/chatRoutes.js";
 import codeExecutionRoutes from "./routes/codeExecutionRoute.js";
+import questionRoutes from "./routes/questionRoute.js";
 import sessionRoutes from "./routes/sessionRoute.js";
 import userRoutes from "./routes/userRoute.js";
 
@@ -135,6 +136,7 @@ app.use(clerkMiddleware()); // this adds auth field to request object: req.auth(
 app.use("/api/inngest", serve({ client: inngest, functions }));
 app.use("/api/chat", chatRoutes);
 app.use("/api/code", codeExecutionRoutes);
+app.use("/api/questions", questionRoutes);
 app.use("/api/sessions", sessionRoutes);
 app.use("/api/users", userRoutes);
 

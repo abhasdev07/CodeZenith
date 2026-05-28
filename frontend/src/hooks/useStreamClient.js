@@ -177,7 +177,7 @@ function useStreamClient(session, loadingSession, isHost, isParticipant) {
         ["ended", "completed", "cancelled"].includes(session?.status);
       if (isUnmountingOrDifferentCall) cleanup();
     };
-  }, [session?._id, session?.callId, session?.status, isHost, isParticipant]);
+  }, [session?._id, session?.callId, session?.status, isHost, isParticipant, loadingSession]);
 
   return {
     streamClient,

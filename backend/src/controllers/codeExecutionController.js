@@ -1,4 +1,5 @@
-import { getProblemByTitle } from "../data/problemRegistry.js";
+import { resolveQuestionForExecution } from "./questionController.js";
+import { normalizeTestCases } from "../lib/questionSerializer.js";
 import Session from "../models/Session.js";
 
 const PISTON_API_URL = "https://emkc.org/api/v2/piston";
@@ -10,6 +11,10 @@ const LANGUAGE_RUNTIME = {
   java: { language: "java", version: "15.0.2", file: "Main.java" },
   cpp: { language: "cpp", version: "10.2.0", file: "main.cpp" },
 };
+
+function asPlainProblem(problem) {
+  return problem?.toObject ? problem.toObject() : problem;
+}
 
 function normalizeSessionRole(session, userId) {
   if (session.participant?.toString() === userId.toString()) return "candidate";
@@ -46,7 +51,7 @@ function buildJsHarness(sourceCode, problem, testCases) {
   return `${sourceCode}
 
 const __czTests = ${json(testCases)};
-const __czExpected = __czTests.map((test) => test.expected);
+const __czExpected = __czTests.map((test) => test.expectedOutput);
 const __czResults = [];
 const __czStart = Date.now();
 for (let i = 0; i < __czTests.length; i += 1) {
@@ -57,21 +62,22 @@ for (let i = 0; i < __czTests.length; i += 1) {
   } catch (err) {
     error = err && err.stack ? err.stack : String(err);
   }
-  const expected = __czExpected[i];
-  const passed = !error && JSON.stringify(actual) === JSON.stringify(expected);
+    const expected = __czExpected[i];
+    const passed = !error && JSON.stringify(actual) === JSON.stringify(expected);
   __czResults.push({ index: i, input: __czTests[i].input, expected, actual, passed, error });
 }
-console.log("__CZ_RESULT__" + JSON.stringify({
+process.stdout.write("__CZ_RESULT__" + JSON.stringify({
   results: __czResults,
   runtimeMs: Date.now() - __czStart,
   memoryKb: 0
-}));`;
+}) + "\\n");`;
 }
 
 function buildPythonHarness(sourceCode, problem, testCases) {
   return `${sourceCode}
 
 import json as __cz_json
+import sys as __cz_sys
 import time as __cz_time
 __cz_tests = ${json(testCases)}
 __cz_results = []
@@ -89,7 +95,7 @@ for __cz_index, __cz_test in enumerate(__cz_tests):
         __cz_actual = __cz_callable(*__cz_test["input"])
     except Exception as __cz_exc:
         __cz_error = str(__cz_exc)
-    __cz_expected = __cz_test["expected"]
+    __cz_expected = __cz_test["expectedOutput"]
     __cz_passed = __cz_error is None and __cz_actual == __cz_expected
     __cz_results.append({
         "index": __cz_index,
@@ -99,11 +105,11 @@ for __cz_index, __cz_test in enumerate(__cz_tests):
         "passed": __cz_passed,
         "error": __cz_error,
     })
-print("__CZ_RESULT__" + __cz_json.dumps({
+__cz_sys.stdout.write("__CZ_RESULT__" + __cz_json.dumps({
     "results": __cz_results,
     "runtimeMs": int((__cz_time.time() - __cz_start) * 1000),
     "memoryKb": 0,
-}))`;
+}) + "\\n")`;
 }
 
 function cppCall(problem, input) {
@@ -123,7 +129,7 @@ function buildCppHarness(sourceCode, problem, testCases) {
   const cases = testCases
     .map((testCase, index) => {
       const actualExpression = cppCall(problem, testCase.input);
-      const expected = json(normalizeValue(testCase.expected));
+      const expected = json(normalizeValue(testCase.expectedOutput));
       const input = json(testCase.input);
       const serialize =
         problem.returnType === "intArray"
@@ -203,7 +209,7 @@ function buildJavaHarness(sourceCode, problem, testCases) {
   const cases = testCases
     .map((testCase, index) => {
       const actualExpression = javaCall(problem, testCase.input);
-      const expected = json(normalizeValue(testCase.expected));
+      const expected = json(normalizeValue(testCase.expectedOutput));
       const input = json(testCase.input);
       const serialize =
         problem.returnType === "intArray"
@@ -329,6 +335,7 @@ function parseExecutionResult(providerResult, mode, totalCases) {
 
   const markerLine = stdout
     .split(/\r?\n/)
+    .reverse()
     .find((line) => line.startsWith("__CZ_RESULT__"));
 
   if (!markerLine) {
@@ -345,14 +352,15 @@ function parseExecutionResult(providerResult, mode, totalCases) {
   }
 
   const parsed = JSON.parse(markerLine.replace("__CZ_RESULT__", ""));
-  const cases = parsed.results || [];
-  const passedCount = cases.filter((testCase) => testCase.passed).length;
+  const rawCases = parsed.results || [];
+  const passedCount = rawCases.filter((testCase) => testCase.passed).length;
   const accepted = passedCount === totalCases;
+  const cases = mode === "submit" ? [] : rawCases;
 
   return {
     success: accepted,
-    type: accepted ? "success" : "wrong_answer",
-    verdict: accepted ? (mode === "submit" ? "Accepted" : "All visible cases passed") : "Wrong Answer",
+    type: accepted ? "success" : mode === "submit" ? "wrong_answer" : "visible_case_failed",
+    verdict: mode === "run" ? "Run Complete" : accepted ? "Accepted" : "Wrong Answer",
     output: stdout
       .split(/\r?\n/)
       .filter((line) => !line.startsWith("__CZ_RESULT__"))
@@ -369,10 +377,10 @@ function parseExecutionResult(providerResult, mode, totalCases) {
 
 export async function executeCode(req, res) {
   try {
-    const { sessionId, language, sourceCode, problemTitle, mode = "run" } = req.body;
+    const { sessionId, language, sourceCode, problemTitle, questionId, problemSlug, mode = "run" } = req.body;
 
-    if (!language || !sourceCode || !problemTitle) {
-      return res.status(400).json({ message: "language, sourceCode, and problemTitle are required" });
+    if (!language || !sourceCode || (!problemTitle && !questionId && !problemSlug)) {
+      return res.status(400).json({ message: "language, sourceCode, and a question identifier are required" });
     }
 
     if (!LANGUAGE_RUNTIME[language]) {
@@ -396,19 +404,31 @@ export async function executeCode(req, res) {
       }
     }
 
-    const problem = getProblemByTitle(problemTitle);
-    if (!problem) return res.status(400).json({ message: `Unknown problem: ${problemTitle}` });
+    const resolvedProblem = await resolveQuestionForExecution({
+      questionId,
+      problemTitle,
+      slug: problemSlug,
+    });
+    if (!resolvedProblem) return res.status(400).json({ message: `Unknown problem: ${problemTitle || questionId || problemSlug}` });
+    const problem = asPlainProblem(resolvedProblem);
+    const visibleTestCases = normalizeTestCases(problem.visibleTestCases);
+    const hiddenTestCases = normalizeTestCases(problem.hiddenTestCases);
 
     const testCases =
       mode === "submit"
-        ? [...problem.visibleTestCases, ...problem.hiddenTestCases]
-        : problem.visibleTestCases;
+        ? [...visibleTestCases, ...hiddenTestCases]
+        : visibleTestCases;
+
+    if (testCases.length === 0) {
+      return res.status(400).json({ message: "This question has no testcases configured" });
+    }
 
     const harnessedSource = buildHarness(language, sourceCode, problem, testCases);
 
     console.log("Code execution requested", {
       sessionId,
       problemTitle,
+      questionId: problem._id?.toString?.(),
       language,
       mode,
       testCases: testCases.length,
@@ -422,6 +442,7 @@ export async function executeCode(req, res) {
       ...result,
       mode,
       hiddenCasesIncluded: mode === "submit",
+      casesAreRedacted: mode === "submit",
     });
   } catch (error) {
     console.log("Error in executeCode controller:", error.message);

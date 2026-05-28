@@ -1,17 +1,46 @@
 import { chatClient, streamClient } from "../lib/stream.js";
 import crypto from "crypto";
 import { ENV } from "../lib/env.js";
+import { questionSessionSummary, sanitizeQuestion } from "../lib/questionSerializer.js";
 import { resolveRoleInSession } from "../middleware/sessionAccessMiddleware.js";
+import Question from "../models/Question.js";
 import Session from "../models/Session.js";
 
-function normalizeProblems(payload) {
+async function normalizeProblems(payload) {
   const incomingProblems = Array.isArray(payload?.questions) ? payload.questions : payload?.problems;
+  const incomingQuestionIds = Array.isArray(payload?.questionIds) ? payload.questionIds : [];
+
+  if (incomingQuestionIds.length > 0) {
+    const questions = await Question.find({ _id: { $in: incomingQuestionIds } });
+    const ordered = incomingQuestionIds
+      .map((questionId) => questions.find((question) => question._id.toString() === questionId.toString()))
+      .filter(Boolean);
+    return ordered.map(questionSessionSummary);
+  }
+
   if (Array.isArray(incomingProblems) && incomingProblems.length > 0) {
-    return incomingProblems
-      .map((problem) => ({
-        title: problem?.title?.trim(),
-        difficulty: problem?.difficulty?.toLowerCase(),
-      }))
+    const hydrated = await Promise.all(
+      incomingProblems.map(async (problem) => {
+        const questionId = problem?.questionId || problem?._id;
+        const query = [];
+        if (questionId) query.push({ _id: questionId });
+        if (problem?.slug) query.push({ slug: problem.slug });
+        if (problem?.title) query.push({ title: problem.title.trim() });
+        const question = query.length ? await Question.findOne({ $or: query }) : null;
+        if (question) return questionSessionSummary(question);
+
+        return {
+          questionId: problem?.questionId || null,
+          slug: problem?.slug || "",
+          title: problem?.title?.trim(),
+          difficulty: problem?.difficulty?.toLowerCase(),
+          visibleTestCaseCount: Number(problem?.visibleTestCaseCount || 0),
+          totalTestCaseCount: Number(problem?.totalTestCaseCount || 0),
+        };
+      })
+    );
+
+    return hydrated
       .filter((problem) => problem.title && ["easy", "medium", "hard"].includes(problem.difficulty));
   }
 
@@ -42,8 +71,24 @@ function withInviteLink(sessionDoc) {
   return session;
 }
 
-function getSessionPayload(sessionDoc, user) {
+async function hydrateSessionQuestions(sessionDoc) {
   const session = withInviteLink(sessionDoc);
+  const summaries = session.problems || [];
+  const ids = summaries.map((problem) => problem.questionId).filter(Boolean);
+  if (!ids.length) return session;
+
+  const questions = await Question.find({ _id: { $in: ids } });
+  const byId = new Map(questions.map((question) => [question._id.toString(), sanitizeQuestion(question)]));
+  session.problems = summaries.map((summary) => {
+    const question = summary.questionId ? byId.get(summary.questionId.toString()) : null;
+    return question ? { ...summary, ...question, questionId: summary.questionId, question } : summary;
+  });
+  session.questions = session.problems;
+  return session;
+}
+
+async function getSessionPayload(sessionDoc, user) {
+  const session = await hydrateSessionQuestions(sessionDoc);
   const sessionRole = resolveRoleInSession(session, user);
 
   console.log("Session role assigned", {
@@ -116,7 +161,7 @@ async function joinSessionAsCandidate(session, user, clerkId) {
 
 export async function createSession(req, res) {
   try {
-    const problems = normalizeProblems(req.body);
+    const problems = await normalizeProblems(req.body);
     const userId = req.user._id;
     const clerkId = req.user.clerkId;
 
@@ -177,7 +222,7 @@ export async function createSession(req, res) {
 
     await channel.create();
 
-    res.status(201).json(getSessionPayload(session, req.user));
+    res.status(201).json(await getSessionPayload(session, req.user));
   } catch (error) {
     console.log("Error in createSession controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });
@@ -236,7 +281,7 @@ export async function getSessionById(req, res) {
 
     if (!session) return res.status(404).json({ message: "Session not found" });
 
-    res.status(200).json(getSessionPayload(session, req.user));
+    res.status(200).json(await getSessionPayload(session, req.user));
   } catch (error) {
     console.log("Error in getSessionById controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });
@@ -256,12 +301,12 @@ export async function joinSession(req, res) {
 
     if (session.host.toString() === userId.toString()) {
       // Host rejoining - return with interviewer role
-      return res.status(200).json(getSessionPayload(session, req.user));
+      return res.status(200).json(await getSessionPayload(session, req.user));
     }
 
     if (session.participant?.toString() === userId.toString()) {
       // Already joined as participant - return with candidate role
-      return res.status(200).json(getSessionPayload(session, req.user));
+      return res.status(200).json(await getSessionPayload(session, req.user));
     }
 
     if (session.inviteToken && session.inviteToken !== inviteToken) {
@@ -270,7 +315,7 @@ export async function joinSession(req, res) {
 
     await joinSessionAsCandidate(session, req.user, clerkId);
 
-    res.status(200).json(getSessionPayload(session, req.user));
+    res.status(200).json(await getSessionPayload(session, req.user));
   } catch (error) {
     console.log("Error in joinSession controller:", error.message);
     res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Internal Server Error" });
@@ -291,7 +336,7 @@ export async function joinSessionByInviteToken(req, res) {
       .populate("host", "name email profileImage clerkId")
       .populate("participant", "name email profileImage clerkId");
 
-    return res.status(200).json(getSessionPayload(populatedSession, req.user));
+    return res.status(200).json(await getSessionPayload(populatedSession, req.user));
   } catch (error) {
     console.log("Error in joinSessionByInviteToken controller:", error.message);
     res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Internal Server Error" });
@@ -328,7 +373,7 @@ export async function endSession(req, res) {
     });
 
     res.status(200).json({
-      ...getSessionPayload(session, req.user),
+      ...(await getSessionPayload(session, req.user)),
       message: "Session ended successfully",
     });
   } catch (error) {
@@ -396,7 +441,7 @@ export async function updateActiveProblem(req, res) {
     session.difficulty = availableProblems[parsedIndex].difficulty;
     await session.save();
 
-    res.status(200).json(getSessionPayload(session, req.user));
+    res.status(200).json(await getSessionPayload(session, req.user));
   } catch (error) {
     console.log("Error in updateActiveProblem controller:", error.message);
     res.status(500).json({ message: "Internal Server Error" });

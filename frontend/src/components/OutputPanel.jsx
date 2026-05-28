@@ -20,7 +20,8 @@ function VerdictIcon({ output }) {
 
 function OutputPanel({ output }) {
   const cases = output?.cases || [];
-  const failedCase = cases.find((testCase) => !testCase.passed);
+  const failedCase = cases.find((testCase) => !testCase.passed && !testCase.hidden);
+  const isSubmit = output?.mode === "submit";
 
   return (
     <div className="h-full bg-base-100 flex flex-col">
@@ -45,7 +46,8 @@ function OutputPanel({ output }) {
                   <div>
                     <p className="font-bold text-lg">{output.verdict || "Execution Result"}</p>
                     <p className="text-sm opacity-75">
-                      Passed: {output.passedCount ?? 0}/{output.totalCases ?? 0}
+                      {isSubmit && output.success ? "Passed all " : isSubmit ? "Passed " : "Visible cases: "}
+                      {output.passedCount ?? 0}/{output.totalCases ?? 0} testcases
                     </p>
                   </div>
                 </div>
@@ -82,6 +84,12 @@ function OutputPanel({ output }) {
                     <pre className="text-error whitespace-pre-wrap">{failedCase.error}</pre>
                   )}
                 </div>
+              </div>
+            )}
+
+            {isSubmit && output.type === "wrong_answer" && (
+              <div className="rounded-lg border border-error/30 bg-base-200 p-4 text-sm">
+                Hidden testcase details are not shown. Review your generalized function logic and submit again.
               </div>
             )}
 

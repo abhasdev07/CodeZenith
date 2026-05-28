@@ -1,5 +1,6 @@
 import { Code2Icon, LoaderIcon, PlusIcon } from "lucide-react";
 import { PROBLEMS } from "../data/problems";
+import { useQuestions } from "../hooks/useQuestions";
 
 function CreateSessionModal({
   isOpen,
@@ -9,14 +10,16 @@ function CreateSessionModal({
   onCreateRoom,
   isCreating,
 }) {
-  const problems = Object.values(PROBLEMS);
+  const { data: questionsData, isLoading } = useQuestions();
+  const problems = questionsData?.questions?.length ? questionsData.questions : Object.values(PROBLEMS);
   const selectedProblems = roomConfig.selectedProblems || [];
 
   const toggleProblemSelection = (problem) => {
-    const exists = selectedProblems.some((p) => p.title === problem.title);
+    const problemKey = problem._id || problem.slug || problem.title;
+    const exists = selectedProblems.some((p) => (p.questionId || p.slug || p.title) === problemKey);
     if (exists) {
       setRoomConfig({
-        selectedProblems: selectedProblems.filter((p) => p.title !== problem.title),
+        selectedProblems: selectedProblems.filter((p) => (p.questionId || p.slug || p.title) !== problemKey),
       });
       return;
     }
@@ -24,7 +27,14 @@ function CreateSessionModal({
     setRoomConfig({
       selectedProblems: [
         ...selectedProblems,
-        { title: problem.title, difficulty: problem.difficulty.toLowerCase() },
+        {
+          questionId: problem._id,
+          slug: problem.slug,
+          title: problem.title,
+          difficulty: problem.difficulty.toLowerCase(),
+          visibleTestCaseCount: problem.visibleTestCaseCount ?? problem.visibleTestCases?.length ?? 0,
+          totalTestCaseCount: problem.totalTestCaseCount ?? problem.visibleTestCases?.length ?? 0,
+        },
       ],
     });
   };
@@ -44,8 +54,9 @@ function CreateSessionModal({
               <span className="label-text-alt text-error">*</span>
             </label>
             <div className="max-h-64 overflow-y-auto space-y-2 border border-base-300 rounded-xl p-3 bg-base-200">
+              {isLoading && <div className="text-sm opacity-70 p-2">Loading questions...</div>}
               {problems.map((problem) => {
-                const isChecked = selectedProblems.some((p) => p.title === problem.title);
+                const isChecked = selectedProblems.some((p) => (p.questionId || p.slug || p.title) === (problem._id || problem.slug || problem.title));
                 return (
                   <label
                     key={problem.id}
@@ -58,7 +69,11 @@ function CreateSessionModal({
                       onChange={() => toggleProblemSelection(problem)}
                     />
                     <span className="font-medium">{problem.title}</span>
-                    <span className="badge badge-sm badge-ghost ml-auto">{problem.difficulty}</span>
+                    <span className="badge badge-sm badge-ghost ml-auto">
+                      {problem.visibleTestCaseCount ?? problem.visibleTestCases?.length ?? 0} visible /{" "}
+                      {problem.totalTestCaseCount ?? problem.visibleTestCases?.length ?? 0} total
+                    </span>
+                    <span className="badge badge-sm badge-ghost">{problem.difficulty}</span>
                   </label>
                 );
               })}

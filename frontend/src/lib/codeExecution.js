@@ -5,6 +5,8 @@ export async function executeCode({
   language,
   sourceCode,
   problemTitle,
+  questionId,
+  problemSlug,
   mode = "run",
 }) {
   try {
@@ -12,6 +14,8 @@ export async function executeCode({
       language,
       sourceCode,
       problemTitle,
+      questionId,
+      problemSlug,
       mode,
     };
     if (sessionId) payload.sessionId = sessionId;

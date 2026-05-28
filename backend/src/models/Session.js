@@ -2,6 +2,16 @@ import mongoose from "mongoose";
 
 const sessionProblemSchema = new mongoose.Schema(
   {
+    questionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Question",
+      default: null,
+    },
+    slug: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     title: {
       type: String,
       required: true,
@@ -11,6 +21,16 @@ const sessionProblemSchema = new mongoose.Schema(
       type: String,
       enum: ["easy", "medium", "hard"],
       required: true,
+    },
+    visibleTestCaseCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalTestCaseCount: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   { _id: false }
