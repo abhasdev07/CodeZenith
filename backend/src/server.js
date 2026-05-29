@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
+
 import express from "express";
 import path from "path";
 import cors from "cors";
@@ -25,7 +26,7 @@ const __dirname = path.resolve();
 
 // middleware
 app.use(express.json());
-// credentials:true means the browser can include auth cookies/headers
+
 const allowedOrigins = [
   ENV.CLIENT_URL,
   "http://localhost:5173",
@@ -60,7 +61,13 @@ io.on("connection", (socket) => {
       socketId: socket.id,
       timestamp: Date.now(),
     });
-    console.log("[socket] joined room", { socketId: socket.id, room, userId, role });
+
+    console.log("[socket] joined room", {
+      socketId: socket.id,
+      room,
+      userId,
+      role,
+    });
   });
 
   socket.on("leave-session", ({ sessionId } = {}) => {
@@ -119,7 +126,10 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", (reason) => {
-    console.log("[socket] disconnected", { socketId: socket.id, reason });
+    console.log("[socket] disconnected", {
+      socketId: socket.id,
+      reason,
+    });
   });
 });
 
@@ -127,13 +137,16 @@ app.use(
   cors({
     credentials: true,
     origin: (origin, callback) => {
-      // allow non-browser tools (no origin) and configured app origins
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
       return callback(new Error("Not allowed by CORS"));
     },
   })
 );
-app.use(clerkMiddleware()); // this adds auth field to request object: req.auth()
+
+app.use(clerkMiddleware());
 
 app.use("/api/inngest", serve({ client: inngest, functions }));
 app.use("/api/chat", chatRoutes);
@@ -146,19 +159,24 @@ app.get("/health", (req, res) => {
   res.status(200).json({ msg: "api is up and running" });
 });
 
-// make our app ready for deployment
-if (ENV.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+/*
+  IMPORTANT:
+  Frontend is deployed on Vercel.
+  Backend is deployed on Render.
 
-  app.get("/{*any}", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
-  });
+  DO NOT serve React build files from Render.
+*/
+if (ENV.NODE_ENV === "production") {
+  console.log("Running backend API only");
 }
 
 const startServer = async () => {
   try {
     await connectDB();
-    server.listen(ENV.PORT, () => console.log("Server is running on port:", ENV.PORT));
+
+    server.listen(ENV.PORT, () => {
+      console.log("Server is running on port:", ENV.PORT);
+    });
   } catch (error) {
     console.error("💥 Error starting the server", error);
   }
