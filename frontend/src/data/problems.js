@@ -267,7 +267,7 @@ export const LANGUAGE_CONFIG = {
   },
   cpp: {
     name: "C++",
-    icon: "/java.png",
+    icon: "/cpp.png",
     monacoLang: "cpp",
   },
   java: {

@@ -5,10 +5,14 @@ import Navbar from "../components/Navbar";
 import { useJoinSessionByToken } from "../hooks/useSessions";
 import { clearSessionLeft } from "../lib/sessionLifecycle";
 
+const JOIN_RETRY_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 12000];
+const isNotFoundError = (error) => error?.response?.status === 404;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function JoinSessionPage() {
   const { token } = useParams();
   const navigate = useNavigate();
-  const joinSessionMutation = useJoinSessionByToken();
+  const joinSessionMutation = useJoinSessionByToken({ silentNotFound: true });
   
   const attemptedTokenRef = useRef(null);
   const navigationInProgressRef = useRef(false);
@@ -61,12 +65,27 @@ function JoinSessionPage() {
           throw new Error("Mutation not initialized");
         }
 
-        const joinPromise = mutateAsyncRef.current(token);
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error("Join timed out after 12 seconds")), 12000);
-        });
-        
-        const data = await Promise.race([joinPromise, timeoutPromise]);
+        let data;
+        for (let attempt = 0; attempt <= JOIN_RETRY_DELAYS_MS.length; attempt += 1) {
+          try {
+            const joinPromise = mutateAsyncRef.current(token);
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error("Join timed out after 12 seconds")), 12000);
+            });
+
+            data = await Promise.race([joinPromise, timeoutPromise]);
+            break;
+          } catch (error) {
+            const shouldRetry =
+              isNotFoundError(error) && attempt < JOIN_RETRY_DELAYS_MS.length;
+            if (!shouldRetry) throw error;
+
+            console.log(
+              `[JoinSessionPage] Session not ready, retrying join in ${JOIN_RETRY_DELAYS_MS[attempt]}ms`
+            );
+            await wait(JOIN_RETRY_DELAYS_MS[attempt]);
+          }
+        }
         
         console.log("[JoinSessionPage] Join succeeded:", data);
         

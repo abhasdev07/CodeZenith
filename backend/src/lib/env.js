@@ -12,4 +12,6 @@ export const ENV = {
   STREAM_API_KEY: process.env.STREAM_API_KEY,
   STREAM_API_SECRET: process.env.STREAM_API_SECRET,
   JUDGE0_API_URL: process.env.JUDGE0_API_URL || "https://ce.judge0.com",
+  CODE_EXECUTION_PROVIDER: process.env.CODE_EXECUTION_PROVIDER,
+  ALLOW_LOCAL_CODE_EXECUTION: process.env.ALLOW_LOCAL_CODE_EXECUTION,
 };

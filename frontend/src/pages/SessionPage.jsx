@@ -182,6 +182,8 @@ function SessionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [remoteCursor, setRemoteCursor] = useState(null);
   const inviteToken = searchParams.get("invite") || "";
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const outputPanelRef = useRef(null);
 
   const { data: sessionData, isLoading: loadingSession, refetch } = useSessionById(id);
 
@@ -193,11 +195,15 @@ function SessionPage() {
 
   const session = sessionData?.session;
   const sessionRole = sessionData?.sessionRole || sessionData?.roleInSession;
+  // sessionLoaded is true once we have a non-null role; prevents false-hiding
+  // interviewer buttons during the initial loading state
+  const sessionLoaded = !!sessionRole || (!loadingSession && !!session);
 
   const isHost = sessionRole === "interviewer";
   const isParticipant = sessionRole === "candidate";
   const isEnded = ["ended", "completed", "cancelled"].includes(session?.status);
-  const canManageSession = isHost && !isEnded;
+  // Only hide management buttons when we KNOW the user is not the host (role is explicitly set)
+  const canManageSession = sessionLoaded && isHost && !isEnded;
   const canEditCode = isParticipant;
   const canRunCode = isParticipant;
   const shouldLockCandidateNavigation = isParticipant && !isHost && !isEnded;
@@ -901,6 +907,39 @@ function SessionPage() {
         column: remoteCursor.positionColumn,
       }
     : remoteCursor;
+  const participantCount = session?.participant ? 2 : 1;
+  // Use counts from the sanitized backend response which correctly includes hidden cases.
+  // Fall back to summing arrays if the virtual fields aren't present.
+  const visibleTestCaseCount =
+    problemData?.visibleTestCaseCount ??
+    (Array.isArray(problemData?.visibleTestCases) ? problemData.visibleTestCases.length : 0);
+  const totalTestCaseCount =
+    problemData?.totalTestCaseCount ??
+    ((Array.isArray(problemData?.visibleTestCases) ? problemData.visibleTestCases.length : 0) +
+     (typeof problemData?.hiddenTestCaseCount === "number" ? problemData.hiddenTestCaseCount : 0)) ??
+    activeProblem?.totalTestCaseCount ??
+    0;
+
+  // Auto-expand the output panel when a submission result arrives
+  useEffect(() => {
+    if (!output || output.mode !== "submit" || !outputPanelRef.current) return;
+    try {
+      outputPanelRef.current.resize(40);
+    } catch {
+      // Panel may not be mounted yet; ignore
+    }
+  }, [output]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = window.matchMedia("(max-width: 1024px)");
+    const syncLayoutMode = () => setIsCompactLayout(mediaQuery.matches);
+
+    syncLayoutMode();
+    mediaQuery.addEventListener("change", syncLayoutMode);
+    return () => mediaQuery.removeEventListener("change", syncLayoutMode);
+  }, []);
 
   const handleCopyInviteLink = async () => {
     if (!session?.inviteToken && !session?.inviteLink) {
@@ -935,35 +974,58 @@ function SessionPage() {
   };
 
   return (
-    <div className="h-screen bg-base-100 flex flex-col">
-      <Navbar hideNavigationLinks={shouldLockCandidateNavigation} />
+    <div className="h-screen overflow-hidden bg-[#08090d] text-base-content flex flex-col">
+      <Navbar />
 
-      <div className="flex-1">
-        <PanelGroup direction="horizontal">
-          {/* LEFT PANEL - CODE EDITOR & PROBLEM DETAILS */}
-          <Panel defaultSize={50} minSize={30}>
-            <PanelGroup direction="vertical">
-              {/* PROBLEM DSC PANEL */}
-              <Panel defaultSize={50} minSize={20}>
-                <div className="h-full overflow-y-auto bg-base-200">
+      <main className="min-h-0 flex-1 p-3 sm:p-4 lg:p-5">
+        <div className="h-full overflow-hidden rounded-3xl border border-white/10 bg-[#0d0f14] p-2 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+          <PanelGroup
+            key={isCompactLayout ? "session-layout-compact" : "session-layout-wide"}
+            direction={isCompactLayout ? "vertical" : "horizontal"}
+            className="h-full"
+          >
+            {/* LEFT PANEL - CODE EDITOR & PROBLEM DETAILS */}
+            <Panel defaultSize={72} minSize={isCompactLayout ? 58 : 56}>
+              <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#111318] shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
+                <PanelGroup direction="vertical">
+                  {/* PROBLEM DSC PANEL */}
+                  <Panel defaultSize={36} minSize={22} maxSize={52}>
+                <div className="h-full min-h-0 overflow-y-auto bg-[#111318]">
                   {/* HEADER SECTION */}
-                  <div className="p-6 bg-base-100 border-b border-base-300">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h1 className="text-3xl font-bold text-base-content">
+                  <div className="px-5 py-4 sm:px-6 bg-[#151820]/95 border-b border-white/10">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="mb-3 flex flex-wrap items-center gap-2">
+                          <span className={`badge badge-sm ${activeDifficultyClass}`}>
+                            {activeProblem?.difficulty
+                              ? activeProblem.difficulty.slice(0, 1).toUpperCase() +
+                                activeProblem.difficulty.slice(1)
+                              : "Easy"}
+                          </span>
+                          {problemData?.category && (
+                            <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-base-content/70">
+                              {problemData.category}
+                            </span>
+                          )}
+                          {isEnded && <span className="badge badge-ghost badge-sm">Ended</span>}
+                        </div>
+                        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-base-content">
                           {activeProblem?.title || "Loading..."}
                         </h1>
-                        {problemData?.category && (
-                          <p className="text-base-content/60 mt-1">{problemData.category}</p>
-                        )}
-                        <p className="text-base-content/60 mt-2">
-                          Host: {session?.host?.name || "Loading..."} •{" "}
-                          {session?.participant ? 2 : 1}/2 participants
-                        </p>
-                        <p className="text-sm text-base-content/60 mt-1">
-                          {problemData?.visibleTestCaseCount ?? problemData?.visibleTestCases?.length ?? 0} visible
-                          testcases â€¢ {problemData?.totalTestCaseCount ?? activeProblem?.totalTestCaseCount ?? 0} total on submit
-                        </p>
+                        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-base-content/60">
+                          <span>Host: {session?.host?.name || "Loading..."}</span>
+                          <span aria-hidden="true" className="text-emerald-400/70">
+                            {"\u2022"}
+                          </span>
+                          <span>{participantCount}/2 participants</span>
+                          <span aria-hidden="true" className="text-emerald-400/70">
+                            {"\u2022"}
+                          </span>
+                          <span>
+                            {visibleTestCaseCount} visible testcases{" "}
+                            <span aria-hidden="true">{"\u2022"}</span> {totalTestCaseCount} total on submit
+                          </span>
+                        </div>
                         {isHost && remoteCursorPosition && (
                           <p className="text-xs text-base-content/50 mt-1">
                             Candidate cursor: line {remoteCursorPosition.lineNumber}, col{" "}
@@ -972,17 +1034,12 @@ function SessionPage() {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`badge badge-lg ${activeDifficultyClass}`}
-                        >
-                          {activeProblem?.difficulty
-                            ? activeProblem.difficulty.slice(0, 1).toUpperCase() +
-                              activeProblem.difficulty.slice(1)
-                            : "Easy"}
-                        </span>
+                      <div className="flex flex-wrap items-center gap-2">
                         {canManageSession && (
-                          <button className="btn btn-secondary btn-sm" onClick={handleCopyInviteLink}>
+                          <button
+                            className="btn btn-secondary btn-sm min-h-9 rounded-lg border-0 px-4"
+                            onClick={handleCopyInviteLink}
+                          >
                             Copy Invite
                           </button>
                         )}
@@ -990,33 +1047,30 @@ function SessionPage() {
                           <button
                             onClick={handleEndSession}
                             disabled={endSessionMutation.isPending}
-                            className="btn btn-error btn-sm gap-2"
+                            className="btn btn-error btn-sm min-h-9 rounded-lg border-0 px-4"
                           >
                             {endSessionMutation.isPending ? (
-                              <Loader2Icon className="w-4 h-4 animate-spin" />
+                              <Loader2Icon className="size-4 animate-spin" />
                             ) : (
-                              <LogOutIcon className="w-4 h-4" />
+                              <LogOutIcon className="size-4" />
                             )}
                             End Session
                           </button>
-                        )}
-                        {isEnded && (
-                          <span className="badge badge-ghost badge-lg">Ended</span>
                         )}
                       </div>
                     </div>
                   </div>
 
                   {sessionProblems.length > 1 && (
-                    <div className="px-6 py-4 border-b border-base-300 bg-base-200/40 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="font-semibold">
+                    <div className="px-5 py-4 sm:px-6 border-b border-white/10 bg-[#101217] space-y-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm font-semibold text-base-content/80">
                           Question {activeProblemIndex + 1} of {sessionProblems.length}
                         </p>
                         {sessionRole === "interviewer" && (
                           <div className="flex items-center gap-2">
                             <button
-                              className="btn btn-sm btn-outline"
+                              className="btn btn-sm btn-outline min-h-9 rounded-lg"
                               onClick={() => handleChangeActiveProblem(activeProblemIndex - 1)}
                               disabled={activeProblemIndex === 0 || updateActiveProblemMutation.isPending}
                             >
@@ -1024,7 +1078,7 @@ function SessionPage() {
                               Previous
                             </button>
                             <button
-                              className="btn btn-sm btn-outline"
+                              className="btn btn-sm btn-outline min-h-9 rounded-lg"
                               onClick={() => handleChangeActiveProblem(activeProblemIndex + 1)}
                               disabled={
                                 activeProblemIndex === sessionProblems.length - 1 ||
@@ -1041,7 +1095,9 @@ function SessionPage() {
                         {sessionProblems.map((problem, index) => (
                           <button
                             key={`${problem.title}-${index}`}
-                            className={`btn btn-xs ${index === activeProblemIndex ? "btn-primary" : "btn-ghost"}`}
+                            className={`btn btn-xs rounded-full px-3 ${
+                              index === activeProblemIndex ? "btn-primary" : "btn-ghost"
+                            }`}
                             onClick={() => handleChangeActiveProblem(index)}
                             disabled={sessionRole !== "interviewer" || updateActiveProblemMutation.isPending}
                           >
@@ -1052,15 +1108,15 @@ function SessionPage() {
                     </div>
                   )}
 
-                  <div className="p-6 space-y-6">
+                  <div className="p-4 sm:p-6 space-y-5">
                     {/* problem desc */}
                     {problemData?.description && (
-                      <div className="bg-base-100 rounded-xl shadow-sm p-5 border border-base-300">
-                        <h2 className="text-xl font-bold mb-4 text-base-content">Description</h2>
-                        <div className="space-y-3 text-base leading-relaxed">
-                          <p className="text-base-content/90">{problemData.description.text}</p>
+                      <div className="rounded-2xl border border-white/10 bg-[#171a21] p-5 sm:p-6 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+                        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-300/80">Problem</h2>
+                        <div className="mt-4 space-y-4 text-[15px] leading-7 text-base-content/85">
+                          <p>{problemData.description.text}</p>
                           {problemData.description.notes?.map((note, idx) => (
-                            <p key={idx} className="text-base-content/90">
+                            <p key={idx}>
                               {note}
                             </p>
                           ))}
@@ -1070,32 +1126,34 @@ function SessionPage() {
 
                     {/* examples section */}
                     {problemData?.examples && problemData.examples.length > 0 && (
-                      <div className="bg-base-100 rounded-xl shadow-sm p-5 border border-base-300">
-                        <h2 className="text-xl font-bold mb-4 text-base-content">Examples</h2>
+                      <div className="rounded-2xl border border-white/10 bg-[#171a21] p-5 sm:p-6 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+                        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-sky-300/80">Examples</h2>
 
-                        <div className="space-y-4">
+                        <div className="mt-4 space-y-4">
                           {problemData.examples.map((example, idx) => (
                             <div key={idx}>
-                              <div className="flex items-center gap-2 mb-2">
-                                <span className="badge badge-sm">{idx + 1}</span>
-                                <p className="font-semibold text-base-content">Example {idx + 1}</p>
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="inline-flex size-6 items-center justify-center rounded-full bg-white/10 text-xs font-semibold">
+                                  {idx + 1}
+                                </span>
+                                <p className="text-sm font-semibold text-base-content/85">Example {idx + 1}</p>
                               </div>
-                              <div className="bg-base-200 rounded-lg p-4 font-mono text-sm space-y-1.5">
-                                <div className="flex gap-2">
-                                  <span className="text-primary font-bold min-w-[70px]">
+                              <div className="rounded-xl border border-white/10 bg-black/20 p-4 font-mono text-sm space-y-2">
+                                <div className="flex gap-3">
+                                  <span className="text-emerald-300 font-bold min-w-[70px]">
                                     Input:
                                   </span>
-                                  <span>{example.input}</span>
+                                  <span className="break-words text-base-content/85">{example.input}</span>
                                 </div>
-                                <div className="flex gap-2">
-                                  <span className="text-secondary font-bold min-w-[70px]">
+                                <div className="flex gap-3">
+                                  <span className="text-sky-300 font-bold min-w-[70px]">
                                     Output:
                                   </span>
-                                  <span>{example.output}</span>
+                                  <span className="break-words text-base-content/85">{example.output}</span>
                                 </div>
                                 {example.explanation && (
-                                  <div className="pt-2 border-t border-base-300 mt-2">
-                                    <span className="text-base-content/60 font-sans text-xs">
+                                  <div className="pt-3 border-t border-white/10 mt-3">
+                                    <span className="text-base-content/60 font-sans text-sm leading-6">
                                       <span className="font-semibold">Explanation:</span>{" "}
                                       {example.explanation}
                                     </span>
@@ -1110,13 +1168,15 @@ function SessionPage() {
 
                     {/* Constraints */}
                     {problemData?.constraints && problemData.constraints.length > 0 && (
-                      <div className="bg-base-100 rounded-xl shadow-sm p-5 border border-base-300">
-                        <h2 className="text-xl font-bold mb-4 text-base-content">Constraints</h2>
-                        <ul className="space-y-2 text-base-content/90">
+                      <div className="rounded-2xl border border-white/10 bg-[#171a21] p-5 sm:p-6 shadow-[0_12px_32px_rgba(0,0,0,0.18)]">
+                        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300/80">Constraints</h2>
+                        <ul className="mt-4 space-y-3 text-base-content/85">
                           {problemData.constraints.map((constraint, idx) => (
-                            <li key={idx} className="flex gap-2">
-                              <span className="text-primary">•</span>
-                              <code className="text-sm">{constraint}</code>
+                            <li key={idx} className="flex gap-3 rounded-lg bg-black/20 px-3 py-2">
+                              <span className="mt-1 text-emerald-300" aria-hidden="true">
+                                {"\u2022"}
+                              </span>
+                              <code className="text-sm leading-6">{constraint}</code>
                             </li>
                           ))}
                         </ul>
@@ -1126,11 +1186,12 @@ function SessionPage() {
                 </div>
               </Panel>
 
-              <PanelResizeHandle className="h-2 bg-base-300 hover:bg-primary transition-colors cursor-row-resize" />
+              <PanelResizeHandle className="h-2 bg-[#0d0f14] transition-colors hover:bg-emerald-400/30 cursor-row-resize" />
 
-              <Panel defaultSize={50} minSize={20}>
-                <PanelGroup direction="vertical">
-                  <Panel defaultSize={70} minSize={30}>
+              <Panel defaultSize={64} minSize={42}>
+                <div className="h-full min-h-0 bg-[#0d0f14] p-2">
+                  <PanelGroup direction="vertical">
+                  <Panel defaultSize={76} minSize={48}>
                     <CodeEditorPanel
                       key={`${session?._id || "session"}-${activeProblemIndex}-${selectedLanguage}-${isParticipant}`}
                       selectedLanguage={selectedLanguage}
@@ -1148,45 +1209,55 @@ function SessionPage() {
                     />
                   </Panel>
 
-                  <PanelResizeHandle className="h-2 bg-base-300 hover:bg-primary transition-colors cursor-row-resize" />
+                  <PanelResizeHandle className="h-2 bg-[#0d0f14] transition-colors hover:bg-sky-400/30 cursor-row-resize" />
 
-                  <Panel defaultSize={30} minSize={15}>
-                    <OutputPanel output={output} />
+                  <Panel ref={outputPanelRef} defaultSize={24} minSize={16} maxSize={52}>
+                    <OutputPanel output={output} onClose={() => {
+                      setOutput(null);
+                      // Collapse back to default size when closing
+                      try { outputPanelRef.current?.resize(24); } catch { /* ignore */ }
+                    }} />
                   </Panel>
                 </PanelGroup>
+                </div>
               </Panel>
             </PanelGroup>
+            </div>
           </Panel>
 
-          <PanelResizeHandle className="w-2 bg-base-300 hover:bg-primary transition-colors cursor-col-resize" />
+          <PanelResizeHandle
+            className={
+              isCompactLayout
+                ? "h-2 bg-transparent transition-colors hover:bg-emerald-400/20 cursor-row-resize"
+                : "w-2 bg-transparent transition-colors hover:bg-emerald-400/20 cursor-col-resize"
+            }
+          />
 
           {/* RIGHT PANEL - VIDEO CALLS & CHAT */}
-          <Panel defaultSize={50} minSize={30}>
-            <div className="h-full bg-base-200 p-4 overflow-auto">
+          <Panel defaultSize={28} minSize={isCompactLayout ? 20 : 22} maxSize={isCompactLayout ? 42 : 34}>
+            <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-400/15 bg-[#101512] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
               {isInitializingCall ? (
-                <div className="h-full flex items-center justify-center">
+                <div className="h-full flex items-center justify-center rounded-2xl border border-white/10 bg-[#151820]">
                   <div className="text-center">
-                    <Loader2Icon className="w-12 h-12 mx-auto animate-spin text-primary mb-4" />
-                    <p className="text-lg">Connecting to video call...</p>
+                    <Loader2Icon className="size-10 mx-auto animate-spin text-emerald-300 mb-4" />
+                    <p className="text-sm font-medium text-base-content/75">Connecting to video call...</p>
                   </div>
                 </div>
               ) : !streamClient || !call ? (
-                <div className="h-full flex items-center justify-center">
-                  <div className="card bg-base-100 shadow-xl max-w-md">
-                    <div className="card-body items-center text-center">
-                      <div className="w-24 h-24 bg-error/10 rounded-full flex items-center justify-center mb-4">
-                        <PhoneOffIcon className="w-12 h-12 text-error" />
+                <div className="h-full flex items-center justify-center rounded-2xl border border-white/10 bg-[#151820] p-6 text-center">
+                  <div>
+                      <div className="size-16 mx-auto bg-error/10 border border-error/25 rounded-2xl flex items-center justify-center mb-4">
+                        <PhoneOffIcon className="size-8 text-error" />
                       </div>
-                      <h2 className="card-title text-2xl">Connection Failed</h2>
-                      <p className="text-base-content/70">Unable to connect to the video call</p>
-                    </div>
+                      <h2 className="text-lg font-semibold">Connection Failed</h2>
+                      <p className="mt-1 text-sm text-base-content/60">Unable to connect to the video call</p>
                   </div>
                 </div>
               ) : (
-                <div className="h-full">
+                <div className="h-full min-h-0">
                   {callError && (
-                    <div className="alert alert-warning mb-3 text-sm">
-                      <span>{callError}</span>
+                    <div className="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                      {callError}
                     </div>
                   )}
                   <StreamVideo client={streamClient}>
@@ -1203,7 +1274,8 @@ function SessionPage() {
             </div>
           </Panel>
         </PanelGroup>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }

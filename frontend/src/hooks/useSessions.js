@@ -64,12 +64,15 @@ export const useJoinSessionWithInvite = () => {
   return result;
 };
 
-export const useJoinSessionByToken = () => {
+export const useJoinSessionByToken = ({ silentNotFound = false } = {}) => {
   const result = useMutation({
     mutationKey: ["joinSessionByToken"],
     mutationFn: sessionApi.joinSessionByToken,
     onSuccess: () => toast.success("Joined session successfully!"),
-    onError: (error) => toast.error(error.response?.data?.message || "Failed to join session"),
+    onError: (error) => {
+      if (silentNotFound && error.response?.status === 404) return;
+      toast.error(error.response?.data?.message || "Failed to join session");
+    },
   });
 
   return result;

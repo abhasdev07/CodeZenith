@@ -10,3 +10,98 @@
     cursor: pointer;
   }
 }
+
+@layer components {
+  .session-video-panel .str-video__speaker-layout__wrapper {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout {
+    display: grid !important;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    width: 100% !important;
+    gap: 0.25rem !important;
+    justify-content: stretch !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__spotlight,
+  .session-video-panel .str-video__speaker-layout__participants-bar-buttons-wrapper,
+  .session-video-panel .str-video__speaker-layout__participants-bar-wrapper,
+  .session-video-panel .str-video__speaker-layout__participants-bar,
+  .session-video-panel .str-video__speaker-layout__participant-tile {
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__spotlight {
+    display: block !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__participants-bar-buttons-wrapper {
+    display: block !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__participants-bar-wrapper {
+    overflow: hidden !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__participants-bar {
+    display: block !important;
+  }
+
+  .session-video-panel .str-video__speaker-layout__participant-tile {
+    max-width: none !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+  }
+
+  .session-video-panel .str-video__participant-view,
+  .session-video-panel .str-video__participant-view--dominant-speaker {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    aspect-ratio: auto !important;
+    border-radius: 0.75rem !important;
+    overflow: hidden !important;
+    background: #101923 !important;
+  }
+
+  .session-video-panel .str-video__video-placeholder,
+  .session-video-panel .str-video__video {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .session-video-panel .str-video__call-controls {
+    justify-content: flex-end !important;
+    gap: 0.35rem !important;
+  }
+
+  .session-video-panel .str-video__call-controls button {
+    min-width: 2.25rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.75rem;
+  }
+
+  .session-video-panel .str-chat {
+    height: 100%;
+    background: #151820;
+  }
+
+  .session-video-panel .str-chat__list {
+    background: #151820;
+  }
+
+  .session-video-panel .str-chat__input-flat {
+    background: #101217;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}

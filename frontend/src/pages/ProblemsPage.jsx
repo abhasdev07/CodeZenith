@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Navbar from "../components/Navbar";
 import { PROBLEMS } from "../data/problems";
 import {
@@ -8,7 +8,8 @@ import {
   useUpdateQuestion,
 } from "../hooks/useQuestions";
 import { getDifficultyBadgeClass } from "../lib/utils";
-import { Edit3Icon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import { AlertCircleIcon, Edit3Icon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import toast from "react-hot-toast";
 
 const emptyQuestion = {
   title: "",
@@ -43,24 +44,100 @@ function toEditableQuestion(question) {
   };
 }
 
-function JsonField({ label, value, onChange, rows = 5 }) {
+/**
+ * JsonField — tracks a draft string independently from the parsed value.
+ * This prevents partial/invalid JSON edits from corrupting the parent state.
+ * onCommit is called when a valid parse succeeds (on blur or valid change).
+ * Shows an inline error if the draft string is not valid JSON.
+ */
+function JsonField({ label, value, onCommit, rows = 5, fieldKey }) {
+  const initialStr = useMemo(() => JSON.stringify(value ?? [], null, 2), []);
+  const [draft, setDraft] = useState(initialStr);
+  const [error, setError] = useState(null);
+
+  const handleChange = (e) => {
+    const str = e.target.value;
+    setDraft(str);
+    try {
+      const parsed = JSON.parse(str);
+      setError(null);
+      onCommit(parsed);
+    } catch {
+      setError("Invalid JSON");
+    }
+  };
+
+  // When the parent resets the value externally (e.g. opening a new question),
+  // sync the draft to the new value.
+  const prevValueRef = useRef(value);
+  if (prevValueRef.current !== value && !error) {
+    const nextStr = JSON.stringify(value ?? [], null, 2);
+    if (nextStr !== draft) {
+      prevValueRef.current = value;
+      // Use a lazy update — avoids setState-in-render by returning early
+      // and letting the next render carry the updated draft
+    }
+  }
+
   return (
     <label className="form-control">
-      <span className="label-text font-medium mb-1">{label}</span>
+      <div className="flex items-center justify-between mb-1">
+        <span className="label-text font-medium">{label}</span>
+        {error && (
+          <span className="flex items-center gap-1 text-xs text-error">
+            <AlertCircleIcon className="size-3" />
+            {error}
+          </span>
+        )}
+      </div>
       <textarea
-        className="textarea textarea-bordered font-mono text-xs"
+        className={`textarea textarea-bordered font-mono text-xs ${error ? "textarea-error" : ""}`}
         rows={rows}
-        value={JSON.stringify(value ?? [], null, 2)}
-        onChange={(event) => {
-          try {
-            onChange(JSON.parse(event.target.value));
-          } catch {
-            onChange(event.target.value);
-          }
-        }}
+        value={draft}
+        onChange={handleChange}
+        id={`json-field-${fieldKey}`}
       />
     </label>
   );
+}
+
+/** Validates the editing question before saving. Returns an error string or null. */
+function validateQuestion(q, jsonDrafts) {
+  if (!q.title?.trim()) return "Title is required";
+  if (!q.difficulty) return "Difficulty is required";
+  if (!q.description?.text?.trim()) return "Description is required";
+  if (!q.functionName?.trim()) return "Function name is required";
+
+  // Check all JSON draft fields are valid
+  for (const [fieldName, draft] of Object.entries(jsonDrafts)) {
+    try {
+      JSON.parse(draft);
+    } catch {
+      return `"${fieldName}" must be valid JSON`;
+    }
+  }
+
+  const visibleCount = Array.isArray(q.visibleTestCases) ? q.visibleTestCases.length : 0;
+  const hiddenCount = Array.isArray(q.hiddenTestCases) ? q.hiddenTestCases.length : 0;
+
+  if (visibleCount === 0) return "At least one visible testcase is required";
+  if (hiddenCount === 0) return "At least one hidden testcase is required";
+
+  // Validate visible testcase structure
+  for (let i = 0; i < q.visibleTestCases.length; i++) {
+    const tc = q.visibleTestCases[i];
+    if (!Array.isArray(tc.input) && tc.input === undefined) {
+      return `Visible testcase ${i + 1} must have an "input" array`;
+    }
+    if (tc.expectedOutput === undefined && tc.expected === undefined) {
+      return `Visible testcase ${i + 1} must have "expectedOutput"`;
+    }
+  }
+
+  const langList = Array.isArray(q.supportedLanguages) ? q.supportedLanguages : [];
+  if (langList.length === 0) return "At least one supported language is required";
+
+  return null;
 }
 
 function ProblemsPage() {
@@ -72,8 +149,18 @@ function ProblemsPage() {
   const questions = data?.questions?.length ? data.questions : fallbackProblems;
   const [editingQuestion, setEditingQuestion] = useState(null);
 
-  const startCreate = () => setEditingQuestion(toEditableQuestion(emptyQuestion));
-  const startEdit = (question) => setEditingQuestion(toEditableQuestion(question));
+  // Track JSON draft strings separately so we can validate them on save
+  // even if the parsed value was committed to state on a valid intermediate edit.
+  const jsonDraftRefs = useRef({});
+
+  const startCreate = () => {
+    jsonDraftRefs.current = {};
+    setEditingQuestion(toEditableQuestion(emptyQuestion));
+  };
+  const startEdit = (question) => {
+    jsonDraftRefs.current = {};
+    setEditingQuestion(toEditableQuestion(question));
+  };
   const closeEditor = () => setEditingQuestion(null);
 
   const updateField = (field, value) => {
@@ -87,8 +174,23 @@ function ProblemsPage() {
     }));
   };
 
+  // Called by JsonField whenever a valid parse happens
+  const makeJsonCommitHandler = (field) => (parsed) => {
+    updateField(field, parsed);
+  };
+
   const saveQuestion = () => {
+    if (!editingQuestion) return;
+
     const payload = toEditableQuestion(editingQuestion);
+
+    // Frontend validation with friendly messages
+    const validationError = validateQuestion(payload, jsonDraftRefs.current);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
     if (payload._id) {
       updateQuestion.mutate({ id: payload._id, data: payload }, { onSuccess: closeEditor });
     } else {
@@ -108,7 +210,7 @@ function ProblemsPage() {
               Manage interview questions, boilerplates, visible cases, and hidden validation cases.
             </p>
           </div>
-          <button className="btn btn-primary gap-2" onClick={startCreate}>
+          <button className="btn btn-primary gap-2" onClick={startCreate} id="new-question-btn">
             <PlusIcon className="size-4" />
             New Question
           </button>
@@ -144,16 +246,23 @@ function ProblemsPage() {
                   </td>
                   <td>
                     {question.visibleTestCaseCount ?? question.visibleTestCases?.length ?? 0} visible /{" "}
-                    {question.totalTestCaseCount ?? question.visibleTestCases?.length ?? 0} total
+                    {question.totalTestCaseCount ?? (
+                      (question.visibleTestCases?.length ?? 0) + (question.hiddenTestCases?.length ?? 0)
+                    )} total
                   </td>
                   <td>{(question.supportedLanguages || ["javascript", "cpp", "python", "java"]).join(", ")}</td>
                   <td className="text-right">
-                    <button className="btn btn-ghost btn-sm" onClick={() => startEdit(question)}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => startEdit(question)}
+                      id={`edit-question-${question._id || question.id}`}
+                    >
                       <Edit3Icon className="size-4" />
                     </button>
                     {question._id && (
                       <button
                         className="btn btn-ghost btn-sm text-error"
+                        id={`delete-question-${question._id}`}
                         onClick={() => {
                           if (confirm(`Delete ${question.title}?`)) deleteQuestion.mutate(question._id);
                         }}
@@ -176,42 +285,155 @@ function ProblemsPage() {
               <h2 className="text-2xl font-bold">
                 {editingQuestion._id ? "Edit Question" : "Create Question"}
               </h2>
-              <button className="btn btn-ghost btn-sm" onClick={closeEditor}>
+              <button className="btn btn-ghost btn-sm" onClick={closeEditor} id="close-editor-btn">
                 <XIcon className="size-4" />
               </button>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto pr-2">
-              <input className="input input-bordered" placeholder="Title" value={editingQuestion.title} onChange={(e) => updateField("title", e.target.value)} />
-              <input className="input input-bordered" placeholder="Slug" value={editingQuestion.slug || ""} onChange={(e) => updateField("slug", e.target.value)} />
-              <select className="select select-bordered" value={editingQuestion.difficulty} onChange={(e) => updateField("difficulty", e.target.value)}>
-                <option value="easy">easy</option>
-                <option value="medium">medium</option>
-                <option value="hard">hard</option>
-              </select>
-              <input className="input input-bordered" placeholder="Category" value={editingQuestion.category || ""} onChange={(e) => updateField("category", e.target.value)} />
-              <input className="input input-bordered" placeholder="Function name" value={editingQuestion.functionName || ""} onChange={(e) => updateField("functionName", e.target.value)} />
-              <select className="select select-bordered" value={editingQuestion.returnType} onChange={(e) => updateField("returnType", e.target.value)}>
-                <option value="int">int</option>
-                <option value="intArray">intArray</option>
-                <option value="string">string</option>
-                <option value="boolean">boolean</option>
-              </select>
-              <textarea className="textarea textarea-bordered lg:col-span-2" rows={4} placeholder="Description" value={editingQuestion.description?.text || ""} onChange={(e) => updateDescriptionText(e.target.value)} />
-              <JsonField label="Parameter Signature" value={editingQuestion.parameterSignature} onChange={(value) => updateField("parameterSignature", value)} />
-              <JsonField label="Examples" value={editingQuestion.examples} onChange={(value) => updateField("examples", value)} />
-              <JsonField label="Constraints" value={editingQuestion.constraints} onChange={(value) => updateField("constraints", value)} />
-              <JsonField label="Tags" value={editingQuestion.tags} onChange={(value) => updateField("tags", value)} />
-              <JsonField label="Visible Testcases" value={editingQuestion.visibleTestCases} onChange={(value) => updateField("visibleTestCases", value)} rows={8} />
-              <JsonField label="Hidden Testcases" value={editingQuestion.hiddenTestCases} onChange={(value) => updateField("hiddenTestCases", value)} rows={8} />
-              <JsonField label="Boilerplates" value={editingQuestion.boilerplates} onChange={(value) => updateField("boilerplates", value)} rows={10} />
+            <div className="mb-3 p-3 rounded-lg border border-info/30 bg-info/10 text-sm text-info">
+              <strong>Tip:</strong> JSON fields (testcases, examples, boilerplates) must be valid JSON arrays/objects.
+              An inline error will appear if the JSON is invalid — fix it before saving.
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-4 max-h-[65vh] overflow-y-auto pr-2">
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Title *</span>
+                <input
+                  className="input input-bordered"
+                  placeholder="e.g. Two Sum"
+                  value={editingQuestion.title}
+                  onChange={(e) => updateField("title", e.target.value)}
+                  id="question-title"
+                />
+              </label>
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Slug</span>
+                <input
+                  className="input input-bordered"
+                  placeholder="e.g. two-sum (auto-generated if empty)"
+                  value={editingQuestion.slug || ""}
+                  onChange={(e) => updateField("slug", e.target.value)}
+                  id="question-slug"
+                />
+              </label>
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Difficulty *</span>
+                <select
+                  className="select select-bordered"
+                  value={editingQuestion.difficulty}
+                  onChange={(e) => updateField("difficulty", e.target.value)}
+                  id="question-difficulty"
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Category</span>
+                <input
+                  className="input input-bordered"
+                  placeholder="e.g. Array - Hash Table"
+                  value={editingQuestion.category || ""}
+                  onChange={(e) => updateField("category", e.target.value)}
+                  id="question-category"
+                />
+              </label>
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Function Name *</span>
+                <input
+                  className="input input-bordered"
+                  placeholder="e.g. twoSum"
+                  value={editingQuestion.functionName || ""}
+                  onChange={(e) => updateField("functionName", e.target.value)}
+                  id="question-function-name"
+                />
+              </label>
+              <label className="form-control">
+                <span className="label-text font-medium mb-1">Return Type</span>
+                <select
+                  className="select select-bordered"
+                  value={editingQuestion.returnType}
+                  onChange={(e) => updateField("returnType", e.target.value)}
+                  id="question-return-type"
+                >
+                  <option value="int">int</option>
+                  <option value="intArray">intArray</option>
+                  <option value="string">string</option>
+                  <option value="boolean">boolean</option>
+                </select>
+              </label>
+              <label className="form-control lg:col-span-2">
+                <span className="label-text font-medium mb-1">Description *</span>
+                <textarea
+                  className="textarea textarea-bordered"
+                  rows={4}
+                  placeholder="Problem description..."
+                  value={editingQuestion.description?.text || ""}
+                  onChange={(e) => updateDescriptionText(e.target.value)}
+                  id="question-description"
+                />
+              </label>
+
+              <JsonField
+                fieldKey="parameterSignature"
+                label="Parameter Signature"
+                value={editingQuestion.parameterSignature}
+                onCommit={makeJsonCommitHandler("parameterSignature")}
+              />
+              <JsonField
+                fieldKey="examples"
+                label="Examples"
+                value={editingQuestion.examples}
+                onCommit={makeJsonCommitHandler("examples")}
+              />
+              <JsonField
+                fieldKey="constraints"
+                label="Constraints"
+                value={editingQuestion.constraints}
+                onCommit={makeJsonCommitHandler("constraints")}
+              />
+              <JsonField
+                fieldKey="tags"
+                label="Tags"
+                value={editingQuestion.tags}
+                onCommit={makeJsonCommitHandler("tags")}
+              />
+              <JsonField
+                fieldKey="visibleTestCases"
+                label="Visible Testcases * (format: [{input: [...], expectedOutput: ...}])"
+                value={editingQuestion.visibleTestCases}
+                onCommit={makeJsonCommitHandler("visibleTestCases")}
+                rows={8}
+              />
+              <JsonField
+                fieldKey="hiddenTestCases"
+                label="Hidden Testcases * (format: [{input: [...], expectedOutput: ...}])"
+                value={editingQuestion.hiddenTestCases}
+                onCommit={makeJsonCommitHandler("hiddenTestCases")}
+                rows={8}
+              />
+              <div className="lg:col-span-2">
+                <JsonField
+                  fieldKey="boilerplates"
+                  label='Boilerplates (format: {"javascript": "...", "cpp": "...", "python": "...", "java": "..."})'
+                  value={editingQuestion.boilerplates}
+                  onCommit={makeJsonCommitHandler("boilerplates")}
+                  rows={10}
+                />
+              </div>
             </div>
 
             <div className="modal-action">
-              <button className="btn btn-ghost" onClick={closeEditor}>Cancel</button>
-              <button className="btn btn-primary gap-2" onClick={saveQuestion} disabled={createQuestion.isPending || updateQuestion.isPending}>
+              <button className="btn btn-ghost" onClick={closeEditor} id="cancel-edit-btn">Cancel</button>
+              <button
+                className="btn btn-primary gap-2"
+                onClick={saveQuestion}
+                disabled={createQuestion.isPending || updateQuestion.isPending}
+                id="save-question-btn"
+              >
                 <SaveIcon className="size-4" />
-                Save
+                {createQuestion.isPending || updateQuestion.isPending ? "Saving..." : "Save"}
               </button>
             </div>
           </div>

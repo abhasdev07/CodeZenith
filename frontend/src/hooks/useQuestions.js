@@ -36,6 +36,7 @@ export const useUpdateQuestion = () => {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["questions"] });
       queryClient.invalidateQueries({ queryKey: ["question", variables.id] });
+      queryClient.invalidateQueries({ queryKey: ["session"] });
       toast.success("Question updated");
     },
     onError: (error) => toast.error(error.response?.data?.message || "Failed to update question"),

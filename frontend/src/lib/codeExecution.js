@@ -23,10 +23,24 @@ export async function executeCode({
     const { data } = await axiosInstance.post("/code/execute", payload);
     return data;
   } catch (error) {
+    const data = error.response?.data || {};
+
     return {
       success: false,
-      type: "provider_error",
-      error: error.response?.data?.message || "Failed to execute code",
+      type: data.type || "provider_error",
+      verdict: data.verdict || "Execution Failed",
+      message: data.message || "Failed to execute code",
+      error: data.error || data.message || "Failed to execute code",
+      output: data.output || "",
+      mode,
+      passedCount: data.passedCount ?? 0,
+      totalCases: data.totalCases ?? 0,
+      visiblePassedCount: data.visiblePassedCount ?? 0,
+      visibleCaseCount: data.visibleCaseCount ?? 0,
+      hiddenPassedCount: data.hiddenPassedCount ?? 0,
+      hiddenCaseCount: data.hiddenCaseCount ?? 0,
+      hiddenSummary: data.hiddenSummary || null,
+      cases: data.cases || [],
     };
   }
 }

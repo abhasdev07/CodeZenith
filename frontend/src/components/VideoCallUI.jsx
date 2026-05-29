@@ -21,22 +21,23 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
 
   if (callingState === CallingState.JOINING) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex items-center justify-center rounded-2xl border border-white/10 bg-[#151820]">
         <div className="text-center">
-          <Loader2Icon className="w-12 h-12 mx-auto animate-spin text-primary mb-4" />
-          <p className="text-lg">Joining call...</p>
+          <Loader2Icon className="size-10 mx-auto animate-spin text-emerald-300 mb-4" />
+          <p className="text-sm font-medium text-base-content/75">Joining call...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex gap-3 relative str-video">
-      <div className="flex-1 flex flex-col gap-3">
-        {/* Participants count badge and Chat Toggle */}
-        <div className="flex items-center justify-between gap-2 bg-base-100 p-3 rounded-lg shadow">
-          <div className="flex items-center gap-2">
-            <UsersIcon className="w-5 h-5 text-primary" />
+    <div className="session-video-panel h-full min-h-0 flex flex-col gap-3 str-video">
+      <div className="min-h-0 flex-1 flex flex-col rounded-2xl border border-white/10 bg-[#151820] p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)]">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm text-base-content/80">
+            <span className="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+              <UsersIcon className="size-4 text-emerald-300" />
+            </span>
             <span className="font-semibold">
               {participantCount} {participantCount === 1 ? "participant" : "participants"}
             </span>
@@ -44,7 +45,9 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
           {chatClient && channel && (
             <button
               onClick={() => setIsChatOpen(!isChatOpen)}
-              className={`btn btn-sm gap-2 ${isChatOpen ? "btn-primary" : "btn-ghost"}`}
+              className={`btn btn-sm min-h-9 rounded-lg border-0 px-3 ${
+                isChatOpen ? "btn-primary" : "btn-ghost"
+              }`}
               title={isChatOpen ? "Hide chat" : "Show chat"}
             >
               <MessageSquareIcon className="size-4" />
@@ -53,48 +56,42 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
           )}
         </div>
 
-        <div className="flex-1 bg-base-300 rounded-lg overflow-hidden relative">
+        <div className="mt-3 min-h-[320px] flex-1 overflow-hidden rounded-xl border border-white/10 bg-[#101923] p-1">
           <SpeakerLayout />
         </div>
 
-        <div className="bg-base-100 p-3 rounded-lg shadow flex justify-center">
+        <div className="mt-3 flex justify-end rounded-xl border border-white/10 bg-black/20 px-2 py-2">
           <CallControls onLeave={onLeaveMeeting || (() => navigate("/dashboard"))} />
         </div>
       </div>
 
       {/* CHAT SECTION */}
 
-      {chatClient && channel && (
+      {chatClient && channel && isChatOpen && (
         <div
-          className={`flex flex-col rounded-lg shadow overflow-hidden bg-[#272a30] transition-all duration-300 ease-in-out ${
-            isChatOpen ? "w-80 opacity-100" : "w-0 opacity-0"
-          }`}
+          className="min-h-0 flex-1 flex flex-col rounded-2xl border border-white/10 shadow-[0_14px_32px_rgba(0,0,0,0.2)] overflow-hidden bg-[#151820]"
         >
-          {isChatOpen && (
-            <>
-              <div className="bg-[#1c1e22] p-3 border-b border-[#3a3d44] flex items-center justify-between">
-                <h3 className="font-semibold text-white">Session Chat</h3>
-                <button
-                  onClick={() => setIsChatOpen(false)}
-                  className="text-gray-400 hover:text-white transition-colors"
-                  title="Close chat"
-                >
-                  <XIcon className="size-5" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-hidden stream-chat-dark">
-                <Chat client={chatClient} theme="str-chat__theme-dark">
-                  <Channel channel={channel}>
-                    <Window>
-                      <MessageList />
-                      <MessageInput />
-                    </Window>
-                    <Thread />
-                  </Channel>
-                </Chat>
-              </div>
-            </>
-          )}
+          <div className="bg-[#101217] px-3 py-2.5 border-b border-white/10 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-base-content/90">Session Chat</h3>
+            <button
+              onClick={() => setIsChatOpen(false)}
+              className="btn btn-ghost btn-xs min-h-8 rounded-lg px-2 text-base-content/60 hover:text-base-content"
+              title="Close chat"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden stream-chat-dark">
+            <Chat client={chatClient} theme="str-chat__theme-dark">
+              <Channel channel={channel}>
+                <Window>
+                  <MessageList />
+                  <MessageInput />
+                </Window>
+                <Thread />
+              </Channel>
+            </Chat>
+          </div>
         </div>
       )}
     </div>
