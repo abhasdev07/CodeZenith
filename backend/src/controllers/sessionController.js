@@ -198,29 +198,49 @@ export async function createSession(req, res) {
     });
 
     // create stream video call
-    await streamClient.video.call("default", callId).getOrCreate({
-      data: {
-        created_by_id: clerkId,
-        custom: {
-          problem: firstProblem.title,
-          difficulty: firstProblem.difficulty,
-          problems,
-          questions: problems,
-          activeProblemIndex: 0,
-          currentQuestionIndex: 0,
-          sessionId: session._id.toString(),
+    try {
+      await streamClient.video.call("default", callId).getOrCreate({
+        data: {
+          created_by_id: clerkId,
+          custom: {
+            problem: firstProblem.title,
+            difficulty: firstProblem.difficulty,
+            problems,
+            questions: problems,
+            activeProblemIndex: 0,
+            currentQuestionIndex: 0,
+            sessionId: session._id.toString(),
+          },
         },
-      },
-    });
+      });
+      console.log("Stream video call created successfully:", callId);
+    } catch (streamError) {
+      console.error("Error creating Stream video call:", {
+        callId,
+        error: streamError.message,
+        details: streamError,
+      });
+      throw new Error(`Failed to create video room: ${streamError.message}`);
+    }
 
     // chat messaging
-    const channel = chatClient.channel("messaging", callId, {
-      name: `${firstProblem.title} Session`,
-      created_by_id: clerkId,
-      members: [clerkId],
-    });
+    try {
+      const channel = chatClient.channel("messaging", callId, {
+        name: `${firstProblem.title} Session`,
+        created_by_id: clerkId,
+        members: [clerkId],
+      });
 
-    await channel.create();
+      await channel.create();
+      console.log("Stream chat channel created successfully:", callId);
+    } catch (chatError) {
+      console.error("Error creating Stream chat channel:", {
+        callId,
+        error: chatError.message,
+        details: chatError,
+      });
+      throw new Error(`Failed to create chat channel: ${chatError.message}`);
+    }
 
     res.status(201).json(await getSessionPayload(session, req.user));
   } catch (error) {
