@@ -159,6 +159,20 @@ app.get("/health", (req, res) => {
   res.status(200).json({ msg: "api is up and running" });
 });
 
+// Root endpoint info
+app.get("/", (req, res) => {
+  res.status(200).json({
+    msg: "CodeZenith API",
+    version: "1.0.0",
+    status: "running",
+  });
+});
+
+// Favicon endpoint to prevent 404 noise
+app.get("/favicon.ico", (req, res) => {
+  res.status(204).send();
+});
+
 /*
   IMPORTANT:
   Frontend is deployed on Vercel.
