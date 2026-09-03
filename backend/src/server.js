@@ -37,10 +37,25 @@ const allowedOrigins = [
   "http://10.126.166.246:5173" // Add your LAN IP here
 ].filter(Boolean);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin.replace(/\/$/, ""))) return true;
+
+  try {
+    const { hostname, protocol } = new URL(origin);
+    return protocol === "https:" && hostname.startsWith("code-zenith-") && hostname.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+}
+
 const io = new Server(server, {
   cors: {
     credentials: true,
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
   },
 });
 
@@ -133,7 +148,7 @@ app.use(
     credentials: true,
     origin: (origin, callback) => {
       // allow non-browser tools (no origin) and configured app origins
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS"));
     },
   })
