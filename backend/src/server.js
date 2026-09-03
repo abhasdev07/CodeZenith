@@ -26,8 +26,12 @@ const __dirname = path.resolve();
 // middleware
 app.use(express.json());
 // credentials:true means the browser can include auth cookies/headers
+const configuredClientOrigins = [ENV.CLIENT_URL, ...(ENV.CLIENT_URLS || "").split(",")]
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
 const allowedOrigins = [
-  ENV.CLIENT_URL,
+  ...configuredClientOrigins,
   "http://localhost:5173",
   "http://localhost:5174",
   "http://10.126.166.246:5173" // Add your LAN IP here

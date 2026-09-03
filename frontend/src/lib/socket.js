@@ -1,21 +1,11 @@
 import { io } from "socket.io-client";
+import { getApiOrigin } from "./apiBase";
 
 let socket;
 
-function getSocketUrl() {
-  const apiUrl = import.meta.env.VITE_API_URL;
-  if (!apiUrl) return window.location.origin;
-
-  try {
-    return new URL(apiUrl).origin;
-  } catch {
-    return apiUrl.replace(/\/api\/?$/, "");
-  }
-}
-
 export function getSocket() {
   if (!socket) {
-    socket = io(getSocketUrl(), {
+    socket = io(getApiOrigin(), {
       autoConnect: false,
       withCredentials: true,
       transports: ["websocket", "polling"],
