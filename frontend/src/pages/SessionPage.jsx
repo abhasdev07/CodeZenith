@@ -951,20 +951,20 @@ function SessionPage() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-[#08090d] text-base-content flex flex-col">
+    <div className="h-[100dvh] overflow-hidden bg-[#08090d] text-base-content flex flex-col">
       <Navbar />
 
-      <main className="min-h-0 flex-1 p-3 sm:p-4 lg:p-5">
+      <main className="min-h-0 flex-1 overflow-hidden p-2 sm:p-4 lg:p-5">
         <div className="h-full overflow-hidden rounded-3xl border border-white/10 bg-[#0d0f14] p-2 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
           <PanelGroup
             key={isCompactLayout ? "session-layout-compact" : "session-layout-wide"}
             direction={isCompactLayout ? "vertical" : "horizontal"}
-            className="h-full"
+            className="h-full min-h-0"
           >
             {/* LEFT PANEL - CODE EDITOR & PROBLEM DETAILS */}
             <Panel defaultSize={72} minSize={isCompactLayout ? 58 : 56}>
-              <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#111318] shadow-[0_18px_40px_rgba(0,0,0,0.22)]">
-                <PanelGroup direction="vertical">
+              <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#111318] shadow-[0_18px_40px_rgba(0,0,0,0.22)] flex flex-col">
+                <PanelGroup direction="vertical" className="h-full min-h-0">
                   {/* PROBLEM DSC PANEL */}
                   <Panel defaultSize={36} minSize={22} maxSize={52}>
                 <div className="h-full min-h-0 overflow-y-auto bg-[#111318]">
@@ -1166,8 +1166,8 @@ function SessionPage() {
               <PanelResizeHandle className="h-2 bg-[#0d0f14] transition-colors hover:bg-emerald-400/30 cursor-row-resize" />
 
               <Panel defaultSize={64} minSize={42}>
-                <div className="h-full min-h-0 bg-[#0d0f14] p-2">
-                  <PanelGroup direction="vertical">
+                <div className="h-full min-h-0 overflow-hidden bg-[#0d0f14] p-2">
+                  <PanelGroup direction="vertical" className="h-full min-h-0">
                   <Panel defaultSize={76} minSize={48}>
                     <CodeEditorPanel
                       key={`${session?._id || "session"}-${activeProblemIndex}-${selectedLanguage}-${isParticipant}`}
@@ -1208,7 +1208,7 @@ function SessionPage() {
 
           {/* RIGHT PANEL - VIDEO CALLS & CHAT */}
           <Panel defaultSize={28} minSize={isCompactLayout ? 20 : 22} maxSize={isCompactLayout ? 42 : 34}>
-            <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-emerald-400/15 bg-[#101512] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+            <div className="h-full min-h-0 overflow-y-auto rounded-2xl border border-emerald-400/15 bg-[#101512] p-3 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
               {isInitializingCall ? (
                 <div className="h-full flex items-center justify-center rounded-2xl border border-white/10 bg-[#151820]">
                   <div className="text-center">
@@ -1227,7 +1227,7 @@ function SessionPage() {
                   </div>
                 </div>
               ) : (
-                <div className="h-full min-h-0">
+                <div className="h-full min-h-0 flex flex-col overflow-hidden">
                   {callError && (
                     <div className="mb-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
                       {callError}

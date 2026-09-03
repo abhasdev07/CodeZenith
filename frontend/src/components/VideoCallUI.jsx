@@ -31,9 +31,9 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
   }
 
   return (
-    <div className="session-video-panel h-full min-h-0 flex flex-col gap-3 str-video">
-      <div className="min-h-0 flex-1 flex flex-col rounded-2xl border border-white/10 bg-[#151820] p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)]">
-        <div className="flex items-center justify-between gap-2">
+    <div className="session-video-panel h-full min-h-0 flex flex-col gap-3 overflow-hidden str-video">
+      <div className="min-h-[220px] max-h-[40vh] flex-shrink-0 flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#151820] p-3 shadow-[0_14px_32px_rgba(0,0,0,0.24)]">
+        <div className="flex flex-shrink-0 items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm text-base-content/80">
             <span className="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
               <UsersIcon className="size-4 text-emerald-300" />
@@ -56,11 +56,11 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
           )}
         </div>
 
-        <div className="mt-3 min-h-[320px] flex-1 overflow-hidden rounded-xl border border-white/10 bg-[#101923] p-1">
+        <div className="mt-3 min-h-[140px] flex-1 overflow-hidden rounded-xl border border-white/10 bg-[#101923] p-1">
           <SpeakerLayout />
         </div>
 
-        <div className="mt-3 flex justify-end rounded-xl border border-white/10 bg-black/20 px-2 py-2">
+        <div className="mt-3 flex flex-shrink-0 justify-end overflow-x-auto rounded-xl border border-white/10 bg-black/20 px-2 py-2">
           <CallControls onLeave={onLeaveMeeting || (() => navigate("/dashboard"))} />
         </div>
       </div>
@@ -69,9 +69,9 @@ function VideoCallUI({ chatClient, channel, onLeaveMeeting }) {
 
       {chatClient && channel && isChatOpen && (
         <div
-          className="min-h-0 flex-1 flex flex-col rounded-2xl border border-white/10 shadow-[0_14px_32px_rgba(0,0,0,0.2)] overflow-hidden bg-[#151820]"
+          className="min-h-[250px] flex-1 flex flex-col rounded-2xl border border-white/10 shadow-[0_14px_32px_rgba(0,0,0,0.2)] overflow-hidden bg-[#151820]"
         >
-          <div className="bg-[#101217] px-3 py-2.5 border-b border-white/10 flex items-center justify-between">
+          <div className="flex-shrink-0 bg-[#101217] px-3 py-2.5 border-b border-white/10 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-base-content/90">Session Chat</h3>
             <button
               onClick={() => setIsChatOpen(false)}

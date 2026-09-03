@@ -85,7 +85,7 @@ function CodeEditorPanel({
 
   return (
     <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#0e1117] shadow-[0_16px_40px_rgba(0,0,0,0.22)] flex flex-col">
-      <div className="flex flex-col gap-3 border-b border-white/10 bg-[#151820] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-shrink-0 flex-col gap-3 border-b border-white/10 bg-[#151820] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
             <img
@@ -152,7 +152,7 @@ function CodeEditorPanel({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 bg-[#0b0f14]">
+      <div className="min-h-[220px] flex-1 bg-[#0b0f14]">
         <Editor
           height={"100%"}
           language={LANGUAGE_CONFIG[selectedLanguage].monacoLang}

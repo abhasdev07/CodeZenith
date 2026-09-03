@@ -1,7 +1,7 @@
 import { getDifficultyBadgeClass } from "../lib/utils";
 function ProblemDescription({ problem, currentProblemId, onProblemChange, allProblems }) {
   return (
-    <div className="h-full overflow-y-auto bg-base-200">
+    <div className="h-full min-h-0 overflow-y-auto bg-base-200">
       {/* HEADER SECTION */}
       <div className="p-6 bg-base-100 border-b border-base-300">
         <div className="flex items-start justify-between mb-3">

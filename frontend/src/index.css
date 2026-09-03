@@ -93,15 +93,39 @@
 
   .session-video-panel .str-chat {
     height: 100%;
+    min-height: 0;
     background: #151820;
   }
 
+  .session-video-panel .str-chat__channel,
+  .session-video-panel .str-chat__container,
+  .session-video-panel .str-chat__main-panel,
+  .session-video-panel .str-chat__thread,
+  .session-video-panel .str-chat__window {
+    min-height: 0;
+    height: 100%;
+  }
+
   .session-video-panel .str-chat__list {
+    min-height: 0;
+    overflow-y: auto;
     background: #151820;
   }
 
   .session-video-panel .str-chat__input-flat {
+    flex-shrink: 0;
     background: #101217;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  @media (max-width: 1024px) {
+    .session-video-panel {
+      overflow-y: auto;
+    }
+
+    .session-video-panel .str-video__call-controls {
+      justify-content: flex-start !important;
+      min-width: max-content;
+    }
   }
 }

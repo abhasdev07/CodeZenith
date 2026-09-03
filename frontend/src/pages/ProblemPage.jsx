@@ -79,11 +79,11 @@ function ProblemPage() {
   };
 
   return (
-    <div className="h-screen bg-base-100 flex flex-col">
+    <div className="h-[100dvh] bg-base-100 flex flex-col overflow-hidden">
       <Navbar />
 
-      <div className="flex-1">
-        <PanelGroup direction="horizontal">
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <PanelGroup direction="horizontal" className="h-full min-h-0">
           {/* left panel- problem desc */}
           <Panel defaultSize={40} minSize={30}>
             <ProblemDescription
@@ -98,7 +98,7 @@ function ProblemPage() {
 
           {/* right panel- code editor & output */}
           <Panel defaultSize={60} minSize={30}>
-            <PanelGroup direction="vertical">
+            <PanelGroup direction="vertical" className="h-full min-h-0">
               {/* Top panel - Code editor */}
               <Panel defaultSize={70} minSize={30}>
                 <CodeEditorPanel

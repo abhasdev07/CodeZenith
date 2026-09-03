@@ -58,7 +58,7 @@ function OutputPanel({ output }) {
 
   return (
     <div className="h-full min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#0e1117] shadow-[0_16px_40px_rgba(0,0,0,0.2)] flex flex-col">
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-[#151820] px-4 py-3">
+      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-[#151820] px-4 py-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-base-content/45">Run results</p>
           <h2 className="text-sm font-semibold text-base-content/90">Test cases and logs</h2>
